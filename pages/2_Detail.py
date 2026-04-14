@@ -525,6 +525,7 @@ def _render_bottom_right_pagination_controls(
     page_key: str,
     page_size_key: str,
     default_page_size: int,
+    show_total_pages_in_size_field: bool = False,
 ) -> tuple[int, int]:
     if page_size_key not in st.session_state:
         st.session_state[page_size_key] = int(default_page_size)
@@ -536,6 +537,11 @@ def _render_bottom_right_pagination_controls(
     current_page = int(st.session_state[page_key])
     current_page = max(1, min(current_page, total_pages))
     st.session_state[page_key] = current_page
+    page_display_key = f"{page_key}_display"
+    page_size_display_key = f"{page_size_key}_display"
+    st.session_state[page_display_key] = str(current_page)
+    size_field_value = total_pages if show_total_pages_in_size_field else page_size
+    st.session_state[page_size_display_key] = str(size_field_value)
 
     spacer, controls_col = st.columns([6, 4], gap="small")
     with spacer:
@@ -544,33 +550,37 @@ def _render_bottom_right_pagination_controls(
         label_cols = st.columns([2, 2], gap="small")
         with label_cols[0]:
             st.caption("Page")
-            page_cols = st.columns([2, 1, 1], gap="small")
+            page_cols = st.columns([3, 1, 1], gap="small")
             with page_cols[0]:
                 st.text_input(
                     "현재 페이지",
-                    value=str(current_page),
-                    key=f"{page_key}_display",
+                    key=page_display_key,
                     label_visibility="collapsed",
                     disabled=True,
                 )
             with page_cols[1]:
-                if st.button("-", key=f"{page_key}_minus", width="stretch"):
+                if st.button("<", key=f"{page_key}_minus", width="stretch"):
                     st.session_state[page_key] = max(1, current_page - 1)
                     st.rerun()
             with page_cols[2]:
-                if st.button("+", key=f"{page_key}_plus", width="stretch"):
+                if st.button(">", key=f"{page_key}_plus", width="stretch"):
                     st.session_state[page_key] = min(total_pages, current_page + 1)
                     st.rerun()
 
         with label_cols[1]:
-            st.caption("Page Size")
-            st.text_input(
-                "최대 페이지",
-                value=str(total_pages),
-                key=f"{page_size_key}_max_page_display",
-                label_visibility="collapsed",
-                disabled=True,
-            )
+            st.caption("Total Pages" if show_total_pages_in_size_field else "Page Size")
+            page_size_cols = st.columns([3, 1, 1], gap="small")
+            with page_size_cols[0]:
+                st.text_input(
+                    "페이지 크기",
+                    key=page_size_display_key,
+                    label_visibility="collapsed",
+                    disabled=True,
+                )
+            with page_size_cols[1]:
+                st.empty()
+            with page_size_cols[2]:
+                st.empty()
 
     page_size = int(st.session_state[page_size_key])
     total_pages = max(1, (total_items + page_size - 1) // page_size)
@@ -579,7 +589,10 @@ def _render_bottom_right_pagination_controls(
     return st.session_state[page_key], page_size
 
 
-def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], selected_model_dir: Path | None) -> None:
+def _render_detail_xai_visualization(
+    selected_records: list[dict[str, Any]],
+    selected_model_dir: Path | None,
+) -> None:
     try:
         import numpy as np
         import torch
@@ -649,7 +662,11 @@ def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], sel
     current_xai_page = max(1, min(current_xai_page, xai_total_pages))
     st.session_state["detail_xai_page"] = current_xai_page
     st.session_state["detail_xai_page_size"] = xai_page_size
-    st.caption(f"전체 {total_images}개 이미지에 대해 XAI 수행 | {current_xai_page}/{xai_total_pages} 페이지")
+    page_start = (current_xai_page - 1) * xai_page_size
+    page_end = page_start + xai_page_size
+    page_records = valid_records[page_start:page_end]
+
+    st.caption(f"전체 {total_images}개 이미지 | {current_xai_page}/{xai_total_pages} 페이지")
 
     try:
         image_processor, base_model, device_name, _ = _load_detail_classifier_runtime(selected_model_dir)
@@ -674,10 +691,7 @@ def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], sel
     xai_errors: list[str] = []
     page_items: list[dict[str, Any]] = []
 
-    page_start = (current_xai_page - 1) * xai_page_size
-    page_end = page_start + xai_page_size
-
-    for index, record in enumerate(valid_records):
+    for record in page_records:
         image_path = record["path"]
         filename = record.get("filename", Path(image_path).name)
         try:
@@ -718,16 +732,15 @@ def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], sel
             heatmap_rgb = cmap(normalized)[..., :3]
             overlay = np.clip((1.0 - overlay_alpha) * original_np + overlay_alpha * heatmap_rgb, 0.0, 1.0)
 
-            if page_start <= index < page_end:
-                page_items.append(
-                    {
-                        "filename": filename,
-                        "label": record["label"],
-                        "target_idx": target_idx,
-                        "original": (original_np * 255).astype(np.uint8),
-                        "heatmap": (heatmap_rgb * 255).astype(np.uint8),
-                        "overlay": (overlay * 255).astype(np.uint8),
-                    }
+            page_items.append(
+                {
+                    "filename": filename,
+                    "label": record["label"],
+                    "target_idx": target_idx,
+                    "original": (original_np * 255).astype(np.uint8),
+                    "heatmap": (heatmap_rgb * 255).astype(np.uint8),
+                    "overlay": (overlay * 255).astype(np.uint8),
+                }
                 )
         except Exception as exc:
             xai_errors.append(f"{filename}: {exc}")
@@ -748,6 +761,7 @@ def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], sel
         page_key="detail_xai_page",
         page_size_key="detail_xai_page_size",
         default_page_size=5,
+        show_total_pages_in_size_field=True,
     )
 
     if xai_errors:
@@ -797,60 +811,41 @@ def render_detail_page(image_records) -> None:
         st.session_state["detail_selected_image_paths"] = selected_paths
 
     selected_records = []
+    result_total = 0
+    current_result_page = 1
+    result_page_size = int(st.session_state.get("detail_result_page_size", 25))
+    result_total_pages = 1
+    result_start = 0
+    result_end = result_page_size
+    page_records: list[dict[str, Any]] = []
+    selected_model_dir: Path | None = None
     if selected_paths:
         raw_selected_records = _get_detail_selected_records(image_records)
-        selected_model_dir, model_changed, start_infer = _render_detail_inference_model_selector(raw_selected_records)
-        if model_changed:
-            _reset_detail_finetune_session(selected_paths)
+        selected_model_dir = _get_detail_base_model_dir(raw_selected_records) if raw_selected_records else None
+        result_total = len(raw_selected_records)
+        result_total_pages = max(1, (result_total + result_page_size - 1) // result_page_size)
+        current_result_page = int(st.session_state.get("detail_result_page", 1))
+        current_result_page = max(1, min(current_result_page, result_total_pages))
+        st.session_state["detail_result_page"] = current_result_page
+        st.session_state["detail_result_page_size"] = result_page_size
 
+        result_start = (current_result_page - 1) * result_page_size
+        result_end = result_start + result_page_size
+        page_records = raw_selected_records[result_start:result_end]
         selected_records = raw_selected_records
-        prediction_errors = []
-        artifact_paths = None
-        has_cached_result = False
-        if selected_model_dir is not None:
-            cached_records, cached_errors, cached_artifact_paths = _get_cached_detail_inference_result(
-                raw_selected_records,
-                selected_model_dir,
-            )
-            if cached_records is not None:
-                has_cached_result = True
-                selected_records = cached_records
-                prediction_errors = cached_errors
-                artifact_paths = cached_artifact_paths
-
-            if start_infer:
-                try:
-                    selected_records, prediction_errors, artifact_paths = _predict_detail_records_with_model(
-                        raw_selected_records,
-                        selected_model_dir,
-                    )
-                except RuntimeError as exc:
-                    st.warning(str(exc))
-
-        if selected_model_dir is not None and not start_infer and not has_cached_result:
-            st.info("선택한 모델로 다시 예측하려면 사이드바의 `Start infer` 버튼을 누르세요.")
-
-        if prediction_errors:
-            st.warning("일부 이미지 재추론에 실패했습니다: " + "; ".join(prediction_errors[:3]))
-        if artifact_paths:
-            st.caption(f"Saved inference results: {_to_project_relative_path(artifact_paths['results_path'])}")
-            st.caption(f"Saved inference timing: {_to_project_relative_path(artifact_paths['timing_path'])}")
 
         tab1, tab2, tab3 = st.tabs(["Result", "3D Visualization", "XAI"])
 
+        result_total = len(selected_records)
+        result_total_pages = max(1, (result_total + result_page_size - 1) // result_page_size)
+        current_result_page = max(1, min(current_result_page, result_total_pages))
+        st.session_state["detail_result_page"] = current_result_page
+        st.session_state["detail_result_page_size"] = result_page_size
+        result_start = (current_result_page - 1) * result_page_size
+        result_end = result_start + result_page_size
+        page_records = selected_records[result_start:result_end]
+
         with tab1:
-            result_total = len(selected_records)
-            current_result_page = int(st.session_state.get("detail_result_page", 1))
-            result_page_size = int(st.session_state.get("detail_result_page_size", 25))
-            result_total_pages = max(1, (result_total + result_page_size - 1) // result_page_size)
-            current_result_page = max(1, min(current_result_page, result_total_pages))
-            st.session_state["detail_result_page"] = current_result_page
-            st.session_state["detail_result_page_size"] = result_page_size
-
-            result_start = (current_result_page - 1) * result_page_size
-            result_end = result_start + result_page_size
-            page_records = selected_records[result_start:result_end]
-
             st.caption(f"전체 {result_total}개 이미지 | {current_result_page}/{result_total_pages} 페이지")
 
             with st.expander(f"Selected images ({len(page_records)}/{result_total})", expanded=True):

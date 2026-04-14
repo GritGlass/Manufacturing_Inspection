@@ -319,6 +319,7 @@ def _apply_font_to_axis(axis: Any, font_prop: Any | None) -> None:
 
 @st.cache_data(show_spinner=False)
 def build_summary_pdf_bytes(
+    period_range: str,
     latest_timestamp: str,
     overview_rows: tuple[tuple[str, int], ...],
     label_rows: tuple[tuple[str, int], ...],
@@ -332,141 +333,241 @@ def build_summary_pdf_bytes(
     pdf_buffer = BytesIO()
 
     with PdfPages(pdf_buffer) as pdf:
-        fig = plt.figure(figsize=(8.27, 11.69))
-        fig.suptitle(
-            "Manufacturing Summary Report",
-            fontsize=20,
-            fontproperties=font_prop,
-            y=0.97,
-        )
-        fig.text(
-            0.08,
-            0.93,
-            f"Latest run: {latest_timestamp}",
-            fontsize=11,
-            fontproperties=font_prop,
-        )
+        trend_map = {title.lower(): points for title, points in trend_rows}
 
-        overview_ax = fig.add_axes([0.08, 0.68, 0.84, 0.18])
+        def _sanitize_analysis_comment(text: str) -> str:
+            cleaned_lines = [
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("#")
+            ]
+            cleaned = "\n".join(cleaned_lines).strip()
+            return cleaned if cleaned else "Analysis comment is not available."
+
+        cleaned_analysis_comment = _sanitize_analysis_comment(analysis_comment)
+
+        def _get_trend_points(keyword: str) -> tuple[tuple[str, int], ...]:
+            for title, points in trend_map.items():
+                if keyword in title:
+                    return points
+            return tuple()
+
+        def _draw_line_chart(
+            axis: Any,
+            points: tuple[tuple[str, int], ...],
+            *,
+            x_tick_size: float = 6.5,
+            show_y_label: bool = True,
+            y_label: str = "Value",
+            x_tick_rotation: float = 0.0,
+        ) -> None:
+            x_values = [item[0] for item in points]
+            y_values = [item[1] for item in points]
+            if x_values and y_values:
+                axis.plot(x_values, y_values, marker="o", color="#24A0A8", linewidth=1.3, markersize=2.6)
+            axis.set_title("")
+            if show_y_label:
+                axis.set_ylabel(y_label, fontsize=6.2, fontproperties=font_prop)
+            else:
+                axis.set_ylabel("")
+            axis.grid(alpha=0.22, linewidth=0.5)
+            axis.tick_params(axis="x", labelsize=x_tick_size, pad=1)
+            axis.tick_params(axis="y", labelsize=6.0, pad=1)
+            for tick_label in axis.get_xticklabels():
+                tick_label.set_rotation(x_tick_rotation)
+                tick_label.set_ha("center")
+            _apply_font_to_axis(axis, font_prop)
+
+        fig = plt.figure(figsize=(8.27, 11.69))
+        fig.suptitle("Report", fontsize=16, fontproperties=font_prop, y=0.965)
+        fig.text(0.95, 0.92, f"Period : {period_range}", fontsize=9, fontproperties=font_prop, ha="right")
+
+        fig.text(0.08, 0.865, "• Product Amount", fontsize=11, fontproperties=font_prop, weight="bold")
+        fig.text(0.41, 0.865, "• Product Class Distribution", fontsize=11, fontproperties=font_prop, weight="bold")
+
+        overview_ax = fig.add_axes([0.08, 0.70, 0.22, 0.15])
         overview_ax.axis("off")
-        overview_ax.set_title("Overview", loc="left", fontsize=14, fontproperties=font_prop)
         overview_table = overview_ax.table(
             cellText=[[metric, value] for metric, value in overview_rows],
             colLabels=["Metric", "Value"],
-            cellLoc="center",
+            cellLoc="left",
             loc="center",
+            colWidths=[0.66, 0.34],
         )
         overview_table.auto_set_font_size(False)
-        overview_table.set_fontsize(11)
-        overview_table.scale(1, 1.6)
+        overview_table.set_fontsize(7.8)
+        overview_table.scale(1.0, 1.85)
+        for cell in overview_table.get_celld().values():
+            cell.set_linewidth(0.6)
+            cell.set_edgecolor("#C6C6C6")
         if font_prop is not None:
             for cell in overview_table.get_celld().values():
                 cell.get_text().set_fontproperties(font_prop)
 
-        label_ax = fig.add_axes([0.08, 0.40, 0.84, 0.20])
-        label_ax.set_title("Class Distribution", loc="left", fontsize=14, fontproperties=font_prop)
+        label_ax = fig.add_axes([0.41, 0.72, 0.51, 0.12])
+        label_ax.set_title("")
         labels = [row[0] for row in label_rows]
         counts = [row[1] for row in label_rows]
+        total_label_count = sum(max(int(count), 0) for count in counts)
         label_colors = [_get_discrete_class_colors(labels).get(label, "#5B8FF9") for label in labels]
         label_ax.bar(labels, counts, color=label_colors)
-        label_ax.set_ylabel("Count")
+        label_ax.set_ylabel("Count", fontsize=6.2, fontproperties=font_prop)
+        label_ax.tick_params(axis="x", labelsize=4.2, rotation=90, pad=1)
+        for tick_label in label_ax.get_xticklabels():
+            tick_label.set_ha("center")
+        label_ax.tick_params(axis="y", labelsize=6.0)
+        y_max = max(counts) if counts else 0
+        for idx, count in enumerate(counts):
+            ratio = (count / total_label_count * 100.0) if total_label_count > 0 else 0.0
+            label_ax.text(
+                idx,
+                max(float(count) * 0.5, max(0.3, y_max * 0.05)),
+                f"{count} ({ratio:.0f}%)",
+                ha="center",
+                va="center",
+                rotation=90,
+                fontsize=6.4,
+                weight="bold",
+                color="black",
+                fontproperties=font_prop,
+            )
         _apply_font_to_axis(label_ax, font_prop)
 
-        runs_ax = fig.add_axes([0.08, 0.08, 0.84, 0.24])
-        runs_ax.axis("off")
-        runs_ax.set_title("Recent Runs", loc="left", fontsize=14, fontproperties=font_prop)
-        runs_table = runs_ax.table(
-            cellText=[
-                [name, timestamp, total, good, bad, f"{avg_ms:.2f}", f"{total_ms:.2f}"]
-                for name, timestamp, total, good, bad, avg_ms, total_ms in recent_runs_rows
-            ],
-            colLabels=["Name", "Timestamp", "Total", "OK", "NG", "Avg(ms)", "Total(ms)"],
-            cellLoc="center",
-            loc="center",
+        fig.text(0.08, 0.628, "• Monthly Graph", fontsize=11, fontproperties=font_prop, weight="bold")
+        fig.text(0.51, 0.628, "• Weekly Graph", fontsize=11, fontproperties=font_prop, weight="bold")
+        monthly_ax = fig.add_axes([0.16, 0.503, 0.315, 0.11])
+        weekly_ax = fig.add_axes([0.549, 0.503, 0.315, 0.11])
+        _draw_line_chart(
+            monthly_ax,
+            _get_trend_points("monthly"),
+            x_tick_size=6.0,
+            y_label="Count",
         )
-        runs_table.auto_set_font_size(False)
-        runs_table.set_fontsize(8.5)
-        runs_table.scale(1, 1.4)
-        if font_prop is not None:
-            for cell in runs_table.get_celld().values():
-                cell.get_text().set_fontproperties(font_prop)
-        pdf.savefig(fig, bbox_inches="tight")
+        _draw_line_chart(
+            weekly_ax,
+            _get_trend_points("weekly"),
+            x_tick_size=2.1,
+            show_y_label=False,
+            x_tick_rotation=90,
+        )
+
+        fig.text(0.08, 0.449, "• Daily Graph", fontsize=11, fontproperties=font_prop, weight="bold")
+        daily_ax = fig.add_axes([0.16, 0.304, 0.704, 0.13])
+        _draw_line_chart(daily_ax, _get_trend_points("daily"), x_tick_size=5.8, y_label="Count")
+        daily_ax.set_xlabel("Period", fontsize=6.2, fontproperties=font_prop)
+        _apply_font_to_axis(daily_ax, font_prop)
+
+        wrapped_analysis_text = _wrap_text_lines(cleaned_analysis_comment, width=80)
+        analysis_line_count = wrapped_analysis_text.count("\n") + 1
+        analysis_font_size = 9.0
+        if analysis_line_count >= 10:
+            analysis_font_size = 8.2
+        if analysis_line_count >= 13:
+            analysis_font_size = 7.6
+
+        fig.text(0.08, 0.231, "• Analysis", fontsize=11, fontproperties=font_prop, weight="bold")
+        analysis_ax = fig.add_axes([0.114, 0.061, 0.806, 0.16])
+        analysis_ax.axis("off")
+        analysis_ax.text(
+            0.0,
+            0.9,
+            wrapped_analysis_text,
+            va="top",
+            fontsize=analysis_font_size,
+            fontproperties=font_prop,
+            linespacing=1.28,
+        )
+
+        pdf.savefig(fig)
         plt.close(fig)
-
-        fig, axes = plt.subplots(3, 1, figsize=(8.27, 11.69))
-        fig.suptitle("Trend Graphs", fontsize=18, fontproperties=font_prop, y=0.98)
-        for axis, (title, points) in zip(axes, trend_rows):
-            x_values = [item[0] for item in points]
-            y_values = [item[1] for item in points]
-            axis.plot(x_values, y_values, marker="o", color="#00A6A6", linewidth=2)
-            axis.set_title(title, fontsize=13, fontproperties=font_prop)
-            axis.set_ylabel("Value")
-            axis.grid(alpha=0.25)
-            _apply_font_to_axis(axis, font_prop)
-        axes[-1].set_xlabel("Period")
-        _apply_font_to_axis(axes[-1], font_prop)
-        fig.tight_layout(rect=[0, 0, 1, 0.97])
-        pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
-
-        images_per_page = 4
-        image_chunks = [
-            sample_images[index:index + images_per_page]
-            for index in range(0, len(sample_images), images_per_page)
-        ] or [tuple()]
-
-        for page_index, image_chunk in enumerate(image_chunks, start=1):
-            fig = plt.figure(figsize=(8.27, 11.69))
-            fig.suptitle(
-                f"Inference Images ({page_index}/{len(image_chunks)})",
-                fontsize=18,
-                fontproperties=font_prop,
-                y=0.98,
-            )
-            grid = fig.add_gridspec(2, 2, hspace=0.28, wspace=0.18)
-
-            for idx in range(images_per_page):
-                axis = fig.add_subplot(grid[idx // 2, idx % 2])
-                axis.axis("off")
-                if idx < len(image_chunk):
-                    path, label, filename = image_chunk[idx]
-                    try:
-                        image = Image.open(path).convert("RGB")
-                        axis.imshow(image)
-                        axis.set_title(
-                            f"{label}\n{filename}",
-                            fontsize=9,
-                            fontproperties=font_prop,
-                        )
-                    except Exception:
-                        axis.text(
-                            0.5,
-                            0.5,
-                            f"Image load failed\n{filename}",
-                            ha="center",
-                            va="center",
-                            fontproperties=font_prop,
-                        )
-                else:
-                    axis.text(0.5, 0.5, "No image", ha="center", va="center", fontproperties=font_prop)
-
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
 
         fig = plt.figure(figsize=(8.27, 11.69))
-        fig.suptitle("AI Analysis Comment", fontsize=18, fontproperties=font_prop, y=0.98)
-        text_ax = fig.add_axes([0.08, 0.08, 0.84, 0.82])
-        text_ax.axis("off")
-        text_ax.set_title("AI Analysis Comment", loc="left", fontsize=14, fontproperties=font_prop)
-        text_ax.text(
-            0.0,
-            0.98,
-            _wrap_text_lines(analysis_comment, width=40),
-            va="top",
-            fontsize=11,
-            fontproperties=font_prop,
-        )
-        pdf.savefig(fig, bbox_inches="tight")
+        fig.suptitle("Report", fontsize=16, fontproperties=font_prop, y=0.965)
+        fig.text(0.08, 0.915, "• Inference Image", fontsize=11.5, fontproperties=font_prop, weight="bold")
+
+        image_count = len(sample_images)
+        if image_count > 0:
+            if image_count <= 8:
+                cols = 2
+            elif image_count <= 18:
+                cols = 3
+            else:
+                cols = 4
+
+            rows = max(1, math.ceil(image_count / cols))
+            grid = fig.add_gridspec(
+                rows,
+                cols,
+                left=0.06,
+                right=0.94,
+                top=0.88,
+                bottom=0.06,
+                hspace=0.22,
+                wspace=0.08,
+            )
+
+            base_font = 7.0 if cols <= 2 else 6.2 if cols == 3 else 5.5
+            wrap_width = 26 if cols <= 2 else 17 if cols == 3 else 12
+
+            for idx, (path, label, filename) in enumerate(sample_images):
+                axis = fig.add_subplot(grid[idx // cols, idx % cols])
+                axis.set_xticks([])
+                axis.set_yticks([])
+                for spine in axis.spines.values():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.8)
+                    spine.set_edgecolor("#BFC2C7")
+
+                display_name = textwrap.fill(
+                    str(filename),
+                    width=wrap_width,
+                    max_lines=2,
+                    placeholder="...",
+                )
+                adaptive_font = max(5.0, base_font - max(0.0, (len(str(filename)) - wrap_width * 2) / 18.0))
+
+                try:
+                    image = Image.open(path).convert("RGB")
+                    img_width, img_height = image.size
+
+                    side = max(img_width, img_height)
+                    square_image = Image.new("RGB", (side, side), (255, 255, 255))
+                    square_image.paste(image, ((side - img_width) // 2, (side - img_height) // 2))
+                    square_image = square_image.resize((512, 512))
+
+                    box_x0, box_x1 = 0.04, 0.96
+                    box_y0, box_y1 = 0.24, 0.94
+                    box_width = box_x1 - box_x0
+                    box_height = box_y1 - box_y0
+
+                    # Keep width, but reduce drawable image height by additional 15% from current setting.
+                    draw_box_height = box_height * 0.95 * 0.85
+                    box_y0 = box_y0 + (box_height - draw_box_height) / 2.0
+                    box_y1 = box_y0 + draw_box_height
+                    box_height = draw_box_height
+
+                    draw_side = min(box_width, box_height)
+                    draw_width = draw_side
+                    draw_height = draw_side
+
+                    draw_x0 = box_x0 + (box_width - draw_width) / 2.0
+                    draw_x1 = draw_x0 + draw_width
+                    draw_y0 = box_y0 + (box_height - draw_height) / 2.0
+                    draw_y1 = draw_y0 + draw_height
+
+                    axis.imshow(square_image, extent=(draw_x0, draw_x1, draw_y0, draw_y1), aspect="equal")
+                    axis.set_aspect("equal", adjustable="box")
+                except Exception:
+                    pass
+
+                axis.set_title(str(label), fontsize=adaptive_font + 0.6, fontproperties=font_prop, pad=1.5)
+                axis.set_xlabel(
+                    display_name,
+                    fontsize=adaptive_font,
+                    fontproperties=font_prop,
+                    labelpad=2,
+                )
+
+        pdf.savefig(fig)
         plt.close(fig)
 
     return pdf_buffer.getvalue()
@@ -506,9 +607,16 @@ def render_summary_page(runs, image_records) -> None:
                 )
                 for title, frame in trends.items()
             )
+            if runs:
+                period_start = min(run["timestamp"] for run in runs)
+                period_end = max(run["timestamp"] for run in runs)
+                period_range = f"{period_start.strftime('%y-%m-%d')} ~ {period_end.strftime('%y-%m-%d')}"
+            else:
+                period_range = summary_run["timestamp"].strftime("%y-%m-%d")
 
             try:
                 report_pdf = build_summary_pdf_bytes(
+                    period_range=period_range,
                     latest_timestamp=summary_run["timestamp"].strftime("%Y-%m-%d %H:%M:%S"),
                     overview_rows=tuple(
                         (str(row["Metric"]), int(row["Value"])) for _, row in overview_frame.iterrows()
@@ -572,7 +680,35 @@ def render_summary_page(runs, image_records) -> None:
     for chart_title, frame in trends.items():
         with st.container(border=True):
             st.subheader(chart_title)
-            st.line_chart(frame, width="stretch")
+            try:
+                import plotly.graph_objects as go
+
+                x_values = [str(index) for index in frame.index]
+                y_values = [int(value) for value in frame["value"].tolist()]
+                is_weekly = "weekly" in chart_title.lower()
+                y_axis_label = "Count" if ("monthly" in chart_title.lower() or "daily" in chart_title.lower()) else "Value"
+
+                trend_fig = go.Figure(
+                    data=[
+                        go.Scatter(
+                            x=x_values,
+                            y=y_values,
+                            mode="lines+markers",
+                            line=dict(color="#24A0A8", width=2),
+                            marker=dict(size=6),
+                            showlegend=False,
+                        )
+                    ]
+                )
+                trend_fig.update_layout(
+                    xaxis_title="Period",
+                    yaxis_title=y_axis_label,
+                    xaxis=dict(tickangle=90 if is_weekly else 0),
+                    margin=dict(l=24, r=16, t=20, b=24),
+                )
+                st.plotly_chart(trend_fig, width="stretch")
+            except ImportError:
+                st.line_chart(frame, width="stretch")
 
     with st.container(border=True):
         st.subheader("AI analysis comment")

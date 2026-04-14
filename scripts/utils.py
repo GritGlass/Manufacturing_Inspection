@@ -1120,6 +1120,12 @@ def render_class_distribution_chart(label_frame: pd.DataFrame, container: Any | 
         target.info("No class distribution data available.")
         return
 
+    total_count = sum(max(count, 0) for count in counts)
+    bar_text = [
+        f"{count} ({(count / total_count * 100):.0f}%)" if total_count > 0 else f"{count} (0%)"
+        for count in counts
+    ]
+
     try:
         import plotly.graph_objects as go
     except ImportError:
@@ -1133,9 +1139,12 @@ def render_class_distribution_chart(label_frame: pd.DataFrame, container: Any | 
                 x=labels,
                 y=counts,
                 marker_color=[color_map.get(label, "#5B8FF9") for label in labels],
-                text=counts,
-                textposition="outside",
-                hovertemplate="Class: %{x}<br>Count: %{y}<extra></extra>",
+                text=bar_text,
+                textposition="inside",
+                textangle=90,
+                insidetextanchor="middle",
+                textfont=dict(size=14),
+                hovertemplate="Class: %{x}<br>Count: %{y}<br>Ratio: %{text}<extra></extra>",
                 showlegend=False,
             )
         ]

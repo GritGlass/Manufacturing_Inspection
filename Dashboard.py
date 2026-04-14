@@ -97,8 +97,8 @@ def render_home_page(config: dict[str, Any], runs: list[dict[str, Any]], log_ent
 def main() -> None:
     configure_page("Dashboard Home")
 
-    st.subheader("Dashboard Data Query")
-    st.caption("조회할 날짜 범위를 선택한 뒤 데이터를 불러옵니다.")
+    st.subheader("Data Period")
+    st.caption("조회할 데이터 기간을 선택해 주세요.")
 
     query_cols = st.columns(3, gap="large")
     with query_cols[0]:
