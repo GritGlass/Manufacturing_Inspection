@@ -1,7 +1,9 @@
 # 🏭 Manufacturing Inspection Dashboard
 
 <p align="center">
-  <img src="assets/manufacturing_inspection.png" width="700"/>
+  <a href="https://www.linkedin.com/posts/yuri-h-18670a304_ai-computervision-manufacturing-ugcPost-7449830679279742976-G7oc?utm_source=share&utm_medium=member_desktop&rcm=ACoAAE20GHYBQjrONldF5Ug1Emtcc3XKbVdKhjM">
+    <img src="assets/manufacturing_inspection.png" width="700"/>
+  </a>
 </p>
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
