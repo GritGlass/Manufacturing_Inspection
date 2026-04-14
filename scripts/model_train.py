@@ -208,7 +208,6 @@ class WeightedTrainer(Trainer):
 
 
 def parse_args() -> argparse.Namespace:
-    default_config = BASE_DIR / "data" / "semicondotor_seg_data_path.json"
     default_output_dir = BASE_DIR / "output" / "mobilevit_small_classifier"
 
     parser = argparse.ArgumentParser(
@@ -217,7 +216,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config-path",
         type=Path,
-        default=default_config,
+        required=True,
         help="Path to the dataset and training config JSON file.",
     )
     parser.add_argument(
@@ -238,7 +237,7 @@ def _looks_like_project_path(value: str | Path | None) -> bool:
     if raw_value.startswith((".", "/", "~")):
         return True
     normalized = raw_value.replace("\\", "/")
-    known_prefixes = ("model/", "output/", "data/", "pages/", "scripts/", "log/")
+    known_prefixes = ("model/", "output/", "pages/", "scripts/", "log/")
     if normalized.startswith(known_prefixes):
         return True
     return (BASE_DIR / raw_value).exists()

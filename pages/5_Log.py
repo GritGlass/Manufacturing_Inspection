@@ -1,11 +1,64 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
+import streamlit as st
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from streamlit_dashboard import configure_page, load_dashboard_data, render_log_page
+from scripts.utils import SEVERITY_ORDER, configure_page, load_dashboard_data, render_page_header
+
+
+def render_log_page(log_entries) -> None:
+    render_page_header("Log")
+    if not log_entries:
+        st.info("No log entries found.")
+        return
+
+    key_log = sorted(
+        log_entries,
+        key=lambda item: (
+            SEVERITY_ORDER.get(item["log_type"], 99),
+            item.get("timestamp", ""),
+        ),
+    )[0]
+    with st.container(border=True):
+        st.subheader("Key Log")
+        st.dataframe(
+            pd.DataFrame([key_log])[["date", "time", "source", "log_type", "content", "request", "response"]],
+            width="stretch",
+            hide_index=True,
+        )
+
+    all_dates = ["All dates"] + sorted({entry["date"] for entry in log_entries}, reverse=True)
+    all_types = ["All log types"] + sorted(
+        {entry["log_type"] for entry in log_entries},
+        key=lambda value: SEVERITY_ORDER.get(value, 99),
+    )
+
+    filter_cols = st.columns(2, gap="large")
+    with filter_cols[0]:
+        selected_date = st.selectbox("Date filter", all_dates)
+    with filter_cols[1]:
+        selected_type = st.selectbox("Log type filter", all_types)
+
+    filtered_logs = log_entries
+    if selected_date != "All dates":
+        filtered_logs = [entry for entry in filtered_logs if entry["date"] == selected_date]
+    if selected_type != "All log types":
+        filtered_logs = [entry for entry in filtered_logs if entry["log_type"] == selected_type]
+
+    with st.container(border=True):
+        st.subheader("Log History")
+        if filtered_logs:
+            log_frame = pd.DataFrame(filtered_logs)
+            ordered_columns = ["date", "time", "source", "log_type", "content", "request", "response"]
+            available_columns = [column for column in ordered_columns if column in log_frame.columns]
+            st.dataframe(log_frame[available_columns], width="stretch", hide_index=True)
+        else:
+            st.info("No log entries found for this filter.")
 
 
 configure_page("Log")

@@ -11,16 +11,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from local_gemma_model import are_runtime_dependencies_available, generate_response, is_model_downloaded
-from local_gemma_model import unload_model
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.local_gemma_model import are_runtime_dependencies_available, generate_response, is_model_downloaded
+from scripts.local_gemma_model import unload_model
 
 
-BASE_DIR = Path(__file__).resolve().parent
-CLASSIFICATION_MODEL_ROOT = BASE_DIR / "model" / "classification"
+CLASSIFICATION_MODEL_ROOT = PROJECT_ROOT / "model" / "classification"
 CLASSIFIER_MODEL_DIR = CLASSIFICATION_MODEL_ROOT / "mobilevit_small_9_classifier"
-INTERACTIVE_FINETUNE_SCRIPT = BASE_DIR / "scripts" / "interactive_finetune.py"
-INTERACTIVE_OUTPUT_ROOT = BASE_DIR / "model"
-TRAINING_CONFIG_PATH = BASE_DIR / "data" / "semicondotor_seg_data_path.json"
+INTERACTIVE_FINETUNE_SCRIPT = PROJECT_ROOT / "scripts" / "interactive_finetune.py"
+INTERACTIVE_OUTPUT_ROOT = PROJECT_ROOT / "model"
 DETAIL_FINETUNE_SYSTEM_PROMPT = """당신은 반도체 이미지 분류 모델 파인튜닝 코치입니다.
 반드시 한국어로만 답변하세요.
 당신의 역할은 사용자가 선택한 이미지들에 대해 어떤 클래스로 다시 학습할지 정리하고, 안전한 파인튜닝 계획을 제안하는 것입니다.
@@ -65,7 +67,7 @@ def _resolve_project_path(value: str | Path | None) -> Path | None:
     path = Path(raw_value).expanduser()
     if path.is_absolute():
         return path
-    return (BASE_DIR / path).resolve()
+    return (PROJECT_ROOT / path).resolve()
 
 
 def _to_project_relative_path(value: str | Path | None) -> str:
@@ -75,8 +77,8 @@ def _to_project_relative_path(value: str | Path | None) -> str:
     if not raw_value:
         return "-"
     path = Path(raw_value).expanduser()
-    absolute_path = path if path.is_absolute() else (BASE_DIR / path).resolve()
-    return os.path.relpath(str(absolute_path), str(BASE_DIR))
+    absolute_path = path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+    return os.path.relpath(str(absolute_path), str(PROJECT_ROOT))
 
 
 def _normalize_record_for_artifact(record: dict[str, Any]) -> dict[str, Any]:
@@ -606,8 +608,6 @@ def run_detail_finetune_plan(
         _to_project_relative_path(INTERACTIVE_FINETUNE_SCRIPT),
         "--base-model-dir",
         _to_project_relative_path(resolved_base_model_dir),
-        "--config-path",
-        _to_project_relative_path(TRAINING_CONFIG_PATH),
     ]
     selected_records_manifest_path: str | None = None
     if use_record_labels:
@@ -669,7 +669,7 @@ def run_detail_finetune_plan(
         if log_callback is None:
             completed = subprocess.run(
                 command,
-                cwd=str(BASE_DIR),
+                cwd=str(PROJECT_ROOT),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -677,7 +677,7 @@ def run_detail_finetune_plan(
         else:
             process = subprocess.Popen(
                 command,
-                cwd=str(BASE_DIR),
+                cwd=str(PROJECT_ROOT),
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

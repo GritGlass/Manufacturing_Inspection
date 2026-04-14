@@ -1,6 +1,5 @@
 import argparse
 import csv
-import json
 import math
 import os
 import random
@@ -12,17 +11,16 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 def parse_args() -> argparse.Namespace:
-    default_config = BASE_DIR / "data" / "semicondotor_seg_data_path.json"
     default_output = BASE_DIR / "output" / "sampled_train_dataset.csv"
 
     parser = argparse.ArgumentParser(
-        description="Sample train image paths and save them to a CSV file."
+        description="Sample train image paths from a class-folder directory and save them to a CSV file."
     )
     parser.add_argument(
-        "--config",
+        "--train-dir",
         type=Path,
-        default=default_config,
-        help="Path to the dataset config JSON file.",
+        required=True,
+        help="Path to the train split directory that contains class folders.",
     )
     parser.add_argument(
         "--num-samples",
@@ -66,19 +64,6 @@ def to_project_relative_path(value: str | Path | None) -> str:
     path = Path(raw_value).expanduser()
     absolute_path = path if path.is_absolute() else (BASE_DIR / path).resolve()
     return os.path.relpath(str(absolute_path), str(BASE_DIR))
-
-
-def load_config(config_path: Path) -> dict:
-    with config_path.open("r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def resolve_train_dir(config: dict) -> Path:
-    data_root_path = resolve_project_path(config["data_root_path"])
-    if data_root_path is None:
-        raise ValueError("Configured data_root_path is empty.")
-    train_data_path = str(config["train_data_path"]).lstrip("/\\")
-    return data_root_path / train_data_path
 
 
 def is_image_file(path: Path) -> bool:
@@ -232,12 +217,11 @@ def write_csv(records: list[dict[str, str]], output_csv: Path) -> None:
 
 def main() -> None:
     args = parse_args()
-    args.config = resolve_project_path(args.config)
+    args.train_dir = resolve_project_path(args.train_dir)
     args.output_csv = resolve_project_path(args.output_csv)
-    if args.config is None or args.output_csv is None:
-        raise ValueError("config 또는 output-csv 경로를 해석할 수 없습니다.")
-    config = load_config(args.config)
-    train_dir = resolve_train_dir(config)
+    if args.train_dir is None or args.output_csv is None:
+        raise ValueError("train-dir 또는 output-csv 경로를 해석할 수 없습니다.")
+    train_dir = args.train_dir
 
     if not train_dir.exists():
         raise FileNotFoundError(f"Train directory does not exist: {train_dir}")

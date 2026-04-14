@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 Required setup:
 
-* `data/semicondotor_seg_data_path.json`
+* Training/runtime config is no longer loaded from the legacy local `data` folder
 * `.streamlit/secrets.toml`
 * Optional: local model files in `model/google__gemma-4-E2B-it/`
 
@@ -71,8 +71,8 @@ streamlit run streamlit_dashboard.py
 ├── output/
 ├── pages/
 ├── scripts/
-├── detail_finetune_mcp.py
-├── local_gemma_model.py
+│   ├── detail_finetune_mcp.py
+│   └── local_gemma_model.py
 ├── streamlit_dashboard.py
 ├── requirements.txt
 └── README.md
@@ -94,3 +94,10 @@ streamlit run streamlit_dashboard.py
 ### Version Update
 
 * [Change Log](CHANGELOG.md)
+
+
+
+
+#### Reference
+- Data reference : [Semiconductor](https://www.kaggle.com/datasets/drtawfikrrahman/multi-class-semiconductor-wafer-image-dataset)
+- Model : [Mobilevit_samll](https://huggingface.co/apple/mobilevit-small)

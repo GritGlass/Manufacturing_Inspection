@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from local_gemma_model import MODEL_DIR, MODEL_ID, MODEL_SIZE_NOTE
+from scripts.local_gemma_model import MODEL_DIR, MODEL_ID, MODEL_SIZE_NOTE
 
 
 def main() -> None:

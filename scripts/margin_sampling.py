@@ -13,7 +13,7 @@ try:
 except ImportError:
     SupabaseConnection = None
 
-from detail_finetune_mcp import resolve_base_model_dir
+from scripts.detail_finetune_mcp import resolve_base_model_dir
 
 
 SUPABASE_CONNECTION_NAME = "supabase"

@@ -7,8 +7,8 @@ from typing import Any
 
 
 MODEL_ID = "google/gemma-4-E2B-it"
-BASE_DIR = Path(__file__).resolve().parent
-MODEL_ROOT = BASE_DIR / "model"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MODEL_ROOT = PROJECT_ROOT / "model"
 MODEL_DIR = MODEL_ROOT / "google__gemma-4-E2B-it"
 MODEL_SIZE_NOTE = "about 10.3 GB"
 REQUIRED_MODEL_FILES = (
@@ -61,7 +61,7 @@ def are_runtime_dependencies_available() -> tuple[bool, str]:
 def _resolve_model_dir(model_dir: str | Path | None = None) -> Path:
     candidate = Path(model_dir).expanduser() if model_dir else MODEL_DIR
     if not candidate.is_absolute():
-        candidate = BASE_DIR / candidate
+        candidate = PROJECT_ROOT / candidate
     return candidate.resolve()
 
 
@@ -162,7 +162,7 @@ def generate_response(
     for image_path in image_paths or []:
         resolved_path = Path(image_path)
         if not resolved_path.is_absolute():
-            resolved_path = (BASE_DIR / resolved_path).resolve()
+            resolved_path = (PROJECT_ROOT / resolved_path).resolve()
         if resolved_path.exists():
             user_content.append({"type": "image", "path": str(resolved_path.resolve())})
     user_content.append({"type": "text", "text": prompt.strip()})

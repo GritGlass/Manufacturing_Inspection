@@ -14,7 +14,7 @@ try:
 except ImportError:
     SupabaseConnection = None
 
-from detail_finetune_mcp import resolve_base_model_dir
+from scripts.detail_finetune_mcp import resolve_base_model_dir
 
 
 SUPABASE_CONNECTION_NAME = "supabase"
@@ -151,7 +151,10 @@ def load_supabase_boundary_source_frame() -> pd.DataFrame:
 
 
 def _load_feature_extractor() -> Any:
-    from streamlit_dashboard import _extract_features_from_images
+    try:
+        from utils import _extract_features_from_images
+    except ImportError:
+        from scripts.utils import _extract_features_from_images
 
     return _extract_features_from_images
 

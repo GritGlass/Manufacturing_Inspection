@@ -49,7 +49,6 @@ from model_train import (
     resolve_project_path,
     save_json,
     save_records_csv,
-    synchronize_training_config,
     to_project_relative_path,
 )
 
@@ -72,11 +71,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preprocessing-method", type=str, default="none", required=False)
     parser.add_argument("--manual-target-class-input", type=str, default="", required=False)
     parser.add_argument("--selected-class-option", type=str, default="", required=False)
-    parser.add_argument(
-        "--config-path",
-        type=Path,
-        default=BASE_DIR / "data" / "semicondotor_seg_data_path.json",
-    )
     parser.add_argument("--epochs", type=float, default=2.0)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--repeat-count", type=int, default=16)
@@ -188,11 +182,10 @@ def build_augmented_train_records(
 def main() -> None:
     args = parse_args()
     args.base_model_dir = resolve_project_path(args.base_model_dir)
-    args.config_path = resolve_project_path(args.config_path)
     args.output_root = resolve_project_path(args.output_root)
     args.selected_records_path = resolve_project_path(args.selected_records_path)
-    if args.base_model_dir is None or args.config_path is None or args.output_root is None:
-        raise ValueError("base-model-dir, config-path, output-root 경로를 해석할 수 없습니다.")
+    if args.base_model_dir is None or args.output_root is None:
+        raise ValueError("base-model-dir 또는 output-root 경로를 해석할 수 없습니다.")
     if not args.base_model_dir.exists():
         raise FileNotFoundError(f"Base model directory does not exist: {args.base_model_dir}")
     label2id, id2label = build_label_mappings(args.base_model_dir)
@@ -336,11 +329,6 @@ def main() -> None:
     save_json(config, output_dir / "dataset_config.json")
     save_json(train_result.metrics, output_dir / "train_summary.json")
     save_json(training_args_payload, output_dir / "training_args.json")
-    synchronize_training_config(
-        config_path=args.config_path,
-        base_model_dir=output_dir,
-        additional_classes=sorted({str(record["label"]).strip() for record in selected_records}),
-    )
     save_json(
         {
             "selected_images": [to_project_relative_path(path) for path in selected_images],
@@ -364,7 +352,6 @@ def main() -> None:
             "base_model_dir": to_project_relative_path(args.base_model_dir),
             "manual_target_class_input": args.manual_target_class_input or None,
             "selected_class_option": args.selected_class_option or None,
-            "config_path": to_project_relative_path(args.config_path),
             "saved_model_dir": to_project_relative_path(output_dir),
         },
         output_dir / "interactive_request.json",
