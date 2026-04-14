@@ -3,7 +3,6 @@
 __pycache__
 .fontconfig-cache
 .matplotlib-cache
-data/*
 log/*
 output/*
 test
@@ -13,8 +12,3 @@ model/*
 #secreat
 *.toml
 
-#image
-*.jpg
-*.png
-*.webp
-*.jpeg
