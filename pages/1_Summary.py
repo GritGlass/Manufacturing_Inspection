@@ -684,7 +684,26 @@ def build_summary_pdf_bytes(
     return pdf_buffer.getvalue()
 
 
-def render_summary_page(runs, image_records) -> None:
+def _build_report_period_range(
+    config: dict[str, Any],
+    runs: list[dict[str, Any]],
+    summary_run: dict[str, Any] | None,
+) -> str:
+    query_date_start = str(config.get("query_date_start", "") or "").strip()
+    query_date_end = str(config.get("query_date_end", "") or "").strip()
+
+    if query_date_start not in {"", "all", "not_loaded"} and query_date_end not in {"", "all", "not_loaded"}:
+        return f"{query_date_start} ~ {query_date_end}"
+    if summary_run is None:
+        return "All data"
+    if runs:
+        period_start = min(run["timestamp"] for run in runs)
+        period_end = max(run["timestamp"] for run in runs)
+        return f"{period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}"
+    return summary_run["timestamp"].strftime("%Y-%m-%d")
+
+
+def render_summary_page(config, runs, image_records) -> None:
     render_page_header("Summary")
 
     summary_run = build_aggregate_run(runs)
@@ -718,12 +737,7 @@ def render_summary_page(runs, image_records) -> None:
                 )
                 for title, frame in trends.items()
             )
-            if runs:
-                period_start = min(run["timestamp"] for run in runs)
-                period_end = max(run["timestamp"] for run in runs)
-                period_range = f"{period_start.strftime('%y-%m-%d')} ~ {period_end.strftime('%y-%m-%d')}"
-            else:
-                period_range = summary_run["timestamp"].strftime("%y-%m-%d")
+            period_range = _build_report_period_range(config, runs, summary_run)
 
             try:
                 report_pdf = build_summary_pdf_bytes(
@@ -835,5 +849,5 @@ def render_summary_page(runs, image_records) -> None:
 
 
 configure_page("Summary")
-_config, runs, image_records, _log_entries = load_dashboard_data()
-render_summary_page(runs, image_records)
+config, runs, image_records, _log_entries = load_dashboard_data()
+render_summary_page(config, runs, image_records)

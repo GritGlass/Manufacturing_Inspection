@@ -1,7 +1,7 @@
 # 🏭 Manufacturing Inspection Dashboard
 
 <p align="center">
-  <img src="assets/demo.gif" width="700"/>
+  <img src="assets/manufacturing_inspection.png" width="700"/>
 </p>
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)

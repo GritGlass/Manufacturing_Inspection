@@ -422,7 +422,7 @@ def _sync_fine_tuning_records_to_supabase(
 def _get_detail_manual_setting_defaults(base_model_dir: Path) -> dict[str, Any]:
     dataset_config = read_json_file(resolve_base_model_dir(base_model_dir) / "dataset_config.json", {})
     return {
-        "epochs": max(1.0, min(5.0, float(dataset_config.get("num_epochs", 2.0)))),
+        "epochs": max(1, min(5, int(round(float(dataset_config.get("num_epochs", 2.0)))))),
         "learning_rate": max(1e-6, min(1e-4, float(dataset_config.get("learning_rate", 1e-5)))),
         "repeat_count": max(4, min(64, int(dataset_config.get("interactive_repeat_count", 16)))),
         "preprocessing_method": str(dataset_config.get("interactive_preprocessing_method", "none")),
@@ -578,8 +578,14 @@ def _render_fine_tuning_training_panel(
     panel.divider()
     panel.write("Manual settings")
     manual_defaults = _get_detail_manual_setting_defaults(base_model_dir)
+    default_epochs = int(manual_defaults["epochs"])
     if manual_epochs_key not in st.session_state:
-        st.session_state[manual_epochs_key] = float(manual_defaults["epochs"])
+        st.session_state[manual_epochs_key] = default_epochs
+    else:
+        st.session_state[manual_epochs_key] = max(
+            1,
+            min(5, int(round(float(st.session_state.get(manual_epochs_key, default_epochs))))),
+        )
     if manual_learning_rate_key not in st.session_state:
         st.session_state[manual_learning_rate_key] = float(manual_defaults["learning_rate"])
     if manual_repeat_count_key not in st.session_state:
@@ -589,10 +595,11 @@ def _render_fine_tuning_training_panel(
 
     manual_epochs = panel.number_input(
         "Epochs",
-        min_value=1.0,
-        max_value=5.0,
-        value=float(st.session_state.get(manual_epochs_key, manual_defaults["epochs"])),
-        step=0.5,
+        min_value=1,
+        max_value=5,
+        value=int(st.session_state.get(manual_epochs_key, default_epochs)),
+        step=1,
+        format="%d",
         key=manual_epochs_key,
     )
     manual_learning_rate = panel.number_input(
