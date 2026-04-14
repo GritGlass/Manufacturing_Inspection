@@ -2,13 +2,14 @@
 __pycache__
 .fontconfig-cache
 .matplotlib-cache
-.streamlit/*
 data/*
 log/*
 output/*
 test
 model/*
 
+#secreat
+*.toml
 
 #image
 *.jpg
