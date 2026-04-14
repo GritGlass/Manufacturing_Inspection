@@ -8,11 +8,24 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.utils import SEVERITY_ORDER, configure_page, load_dashboard_data, render_page_header
+from scripts.utils import (
+    SEVERITY_ORDER,
+    configure_page,
+    list_app_log_dates,
+    load_app_logs_by_date,
+    render_page_header,
+)
 
 
-def render_log_page(log_entries) -> None:
+def render_log_page() -> None:
     render_page_header("Log")
+
+    available_dates = list_app_log_dates()
+    date_options = ["All dates", *available_dates]
+    selected_date = st.selectbox("Date filter", date_options)
+    selected_date_value = None if selected_date == "All dates" else selected_date
+
+    log_entries = load_app_logs_by_date(selected_date_value)
     if not log_entries:
         st.info("No log entries found.")
         return
@@ -32,7 +45,6 @@ def render_log_page(log_entries) -> None:
             hide_index=True,
         )
 
-    all_dates = ["All dates"] + sorted({entry["date"] for entry in log_entries}, reverse=True)
     all_types = ["All log types"] + sorted(
         {entry["log_type"] for entry in log_entries},
         key=lambda value: SEVERITY_ORDER.get(value, 99),
@@ -40,13 +52,11 @@ def render_log_page(log_entries) -> None:
 
     filter_cols = st.columns(2, gap="large")
     with filter_cols[0]:
-        selected_date = st.selectbox("Date filter", all_dates)
+        st.text_input("Selected date", value=selected_date, disabled=True)
     with filter_cols[1]:
         selected_type = st.selectbox("Log type filter", all_types)
 
     filtered_logs = log_entries
-    if selected_date != "All dates":
-        filtered_logs = [entry for entry in filtered_logs if entry["date"] == selected_date]
     if selected_type != "All log types":
         filtered_logs = [entry for entry in filtered_logs if entry["log_type"] == selected_type]
 
@@ -62,5 +72,4 @@ def render_log_page(log_entries) -> None:
 
 
 configure_page("Log")
-_config, _runs, _image_records, log_entries = load_dashboard_data()
-render_log_page(log_entries)
+render_log_page()

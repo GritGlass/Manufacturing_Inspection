@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import random
+import re
 import sys
 import textwrap
 import time
@@ -42,19 +43,15 @@ from scripts.local_gemma_model import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 SECRETS_PATH = BASE_DIR / ".streamlit" / "secrets.toml"
 OUTPUT_DIR = BASE_DIR / "output"
 LOG_DIR = BASE_DIR / "log"
-APP_LOG_PATH = LOG_DIR / "dashboard_events.jsonl"
-PAGE_LINKS = (
-    ("Summary", "pages/1_Summary.py"),
-    ("Detail", "pages/2_Detail.py"),
-    ("Fine-tuning", "pages/3_Fine_tuning.py"),
-    ("Setting", "pages/4_Setting.py"),
-    ("Log", "pages/5_Log.py"),
-   
-)
+APP_LOG_FILE_PREFIX = "dashboard"
+APP_LOG_FILE_GLOB = f"{APP_LOG_FILE_PREFIX}_*.log"
+APP_LOG_LINE_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+APP_LOG_PAYLOAD_FIELD_ORDER = ("source", "log_type", "content", "request", "response")
+APP_LOG_PAYLOAD_FIELD_SET = set(APP_LOG_PAYLOAD_FIELD_ORDER)
 SEVERITY_ORDER = {
     "error": 0,
     "Emergency": 1,
@@ -121,6 +118,7 @@ SUPABASE_CONNECTION_NAME = "supabase"
 SUPABASE_IMAGE_TABLE = "semiconductor"
 SUPABASE_IMAGE_COLUMNS = "id,image_path,class,trained,predict,type,created_at"
 SUPABASE_QUERY_TTL = "10m"
+CSV_FALLBACK_DATA_PATH = BASE_DIR / "data" / "data.csv"
 
 
 def _looks_like_project_path(value: str | Path | None) -> bool:
@@ -218,49 +216,111 @@ def _append_app_log(
     response: str = "",
 ) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    entry = _build_log_entry(
-        log_type=log_type,
-        source=source,
-        content=content,
-        request=request,
-        response=response,
+    entry_timestamp = datetime.now()
+    log_path = LOG_DIR / f"{APP_LOG_FILE_PREFIX}_{entry_timestamp.strftime('%Y-%m-%d')}.log"
+    logger_name = f"manufacturing_dashboard.app.{entry_timestamp.strftime('%Y-%m-%d')}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    file_handler_exists = any(
+        isinstance(handler, logging.FileHandler) and Path(getattr(handler, "baseFilename", "")) == log_path
+        for handler in logger.handlers
     )
-    with APP_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    if not file_handler_exists:
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter("%(asctime)s\t%(levelname)s\t%(message)s", APP_LOG_LINE_DATE_FORMAT))
+        logger.addHandler(file_handler)
+
+    def _sanitize_log_value(value: str) -> str:
+        return str(value).replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").strip()
+
+    payload_values = {
+        "source": source,
+        "log_type": log_type,
+        "content": content,
+        "request": request,
+        "response": response,
+    }
+    payload = "\t".join(
+        f"{field}={_sanitize_log_value(payload_values.get(field, ''))}"
+        for field in APP_LOG_PAYLOAD_FIELD_ORDER
+    )
+
+    normalized_type = str(log_type).strip().lower()
+    if normalized_type in {"error", "emergency"}:
+        logger.error(payload)
+    elif normalized_type == "warning":
+        logger.warning(payload)
+    else:
+        logger.info(payload)
+
     load_dashboard_data.clear()
 
 
 def _load_app_logs() -> list[dict[str, str]]:
-    if not APP_LOG_PATH.exists():
+    log_entries: list[dict[str, str]] = []
+    if not LOG_DIR.exists():
         return []
 
-    log_entries: list[dict[str, str]] = []
-    for raw_line in APP_LOG_PATH.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        raw_timestamp = str(payload.get("timestamp", "")).strip()
-        try:
-            entry_timestamp = datetime.fromisoformat(raw_timestamp) if raw_timestamp else datetime.now()
-        except ValueError:
-            entry_timestamp = datetime.now()
-        log_entries.append(
-            _build_log_entry(
-                log_type=str(payload.get("log_type", "done")),
-                source=str(payload.get("source", "App")),
-                content=str(payload.get("content", "")),
-                timestamp=entry_timestamp,
-                request=str(payload.get("request", "")),
-                response=str(payload.get("response", "")),
+    log_paths = sorted(LOG_DIR.glob(APP_LOG_FILE_GLOB), reverse=True)
+    for log_path in log_paths:
+        for raw_line in log_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            parts = line.split("\t", 2)
+            if len(parts) != 3:
+                continue
+            raw_timestamp, _level_name, raw_payload = parts
+            try:
+                entry_timestamp = datetime.strptime(raw_timestamp, APP_LOG_LINE_DATE_FORMAT)
+            except ValueError:
+                continue
+
+            payload_map: dict[str, str] = {}
+            for token in raw_payload.split("\t"):
+                if "=" not in token:
+                    continue
+                key, value = token.split("=", 1)
+                key = key.strip()
+                if key not in APP_LOG_PAYLOAD_FIELD_SET:
+                    continue
+                decoded_value = value.replace("\\n", "\n").replace("\\t", "\t").replace("\\\\", "\\")
+                payload_map[key] = decoded_value
+
+            log_entries.append(
+                _build_log_entry(
+                    log_type=str(payload_map.get("log_type", "done")),
+                    source=str(payload_map.get("source", "App")),
+                    content=str(payload_map.get("content", "")),
+                    timestamp=entry_timestamp,
+                    request=str(payload_map.get("request", "")),
+                    response=str(payload_map.get("response", "")),
+                )
             )
-        )
     return _sort_log_entries(log_entries)
+
+
+def list_app_log_dates() -> list[str]:
+    if not LOG_DIR.exists():
+        return []
+
+    pattern = re.compile(rf"^{re.escape(APP_LOG_FILE_PREFIX)}_(\d{{4}}-\d{{2}}-\d{{2}})\.log$")
+    dates: set[str] = set()
+    for log_path in LOG_DIR.glob(APP_LOG_FILE_GLOB):
+        matched = pattern.match(log_path.name)
+        if matched:
+            dates.add(matched.group(1))
+    return sorted(dates, reverse=True)
+
+
+def load_app_logs_by_date(selected_date: str | None = None) -> list[dict[str, str]]:
+    logs = _load_app_logs()
+    if not selected_date:
+        return logs
+    return [entry for entry in logs if entry.get("date") == selected_date]
 
 
 def _suppress_transformers_path_alias_warning() -> None:
@@ -321,12 +381,75 @@ def _normalize_db_label(value: Any, fallback: str) -> str:
     return raw_value or fallback
 
 
-def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
+def _parse_bool_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    return normalized in {"1", "true", "t", "yes", "y"}
+
+
+def _fetch_csv_fallback_rows(
+    query_date_start: str | None = None,
+    query_date_end: str | None = None,
+) -> list[dict[str, Any]]:
+    if not CSV_FALLBACK_DATA_PATH.exists():
+        raise RuntimeError(f"CSV fallback 파일이 없습니다: {CSV_FALLBACK_DATA_PATH}")
+
+    date_start = None
+    date_end = None
+    if query_date_start and query_date_end:
+        try:
+            date_start = datetime.fromisoformat(query_date_start)
+            date_end = datetime.fromisoformat(query_date_end) + timedelta(days=1)
+        except ValueError:
+            date_start = None
+            date_end = None
+
+    rows: list[dict[str, Any]] = []
+    with CSV_FALLBACK_DATA_PATH.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if not isinstance(row, dict):
+                continue
+
+            if _parse_bool_flag(row.get("trained", False)):
+                continue
+
+            row_timestamp = _parse_record_timestamp(row.get("created_at"), datetime.now())
+            if date_start is not None and date_end is not None:
+                if row_timestamp < date_start or row_timestamp >= date_end:
+                    continue
+
+            rows.append(
+                {
+                    "id": row.get("id"),
+                    "image_path": row.get("image_path"),
+                    "class": row.get("class"),
+                    "trained": _parse_bool_flag(row.get("trained", False)),
+                    "predict": row.get("predict"),
+                    "type": row.get("type") or row.get("img_type"),
+                    "created_at": row.get("created_at"),
+                }
+            )
+    return rows
+
+
+def _fetch_supabase_semiconductor_rows(query_date_start: str | None = None, query_date_end: str | None = None) -> list[dict[str, Any]]:
     if SupabaseConnection is None:
         raise RuntimeError("st_supabase_connection 패키지를 찾지 못했습니다.")
 
     connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
     last_error: Exception | None = None
+
+    date_start = None
+    date_end = None
+    if query_date_start and query_date_end:
+        try:
+            date_start = datetime.fromisoformat(query_date_start)
+            date_end = datetime.fromisoformat(query_date_end) + timedelta(days=1)
+        except ValueError:
+            date_start = None
+            date_end = None
 
     try:
         query_builder = connection.query(
@@ -336,6 +459,11 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
         )
         if hasattr(query_builder, "eq"):
             query_builder = query_builder.eq("trained", False)
+        if date_start is not None and date_end is not None:
+            if hasattr(query_builder, "gte"):
+                query_builder = query_builder.gte("created_at", date_start.isoformat())
+            if hasattr(query_builder, "lt"):
+                query_builder = query_builder.lt("created_at", date_end.isoformat())
         if hasattr(query_builder, "order"):
             query_builder = query_builder.order("created_at", desc=False)
         result = query_builder.execute()
@@ -346,6 +474,11 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
             raise
 
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS).eq("trained", False)
+        if date_start is not None and date_end is not None:
+            if hasattr(query_builder, "gte"):
+                query_builder = query_builder.gte("created_at", date_start.isoformat())
+            if hasattr(query_builder, "lt"):
+                query_builder = query_builder.lt("created_at", date_end.isoformat())
         if hasattr(query_builder, "order"):
             query_builder = query_builder.order("created_at", desc=False)
         result = query_builder.execute()
@@ -369,8 +502,12 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     return normalized_rows
 
 
-def _load_supabase_image_candidates(reference_time: datetime) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    rows = _fetch_supabase_semiconductor_rows()
+def _load_supabase_image_candidates(
+    reference_time: datetime,
+    query_date_start: str | None = None,
+    query_date_end: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    rows = _fetch_supabase_semiconductor_rows(query_date_start=query_date_start, query_date_end=query_date_end)
     discovered_images: list[dict[str, Any]] = []
     warning_logs: list[dict[str, str]] = []
     skipped_missing_paths = 0
@@ -424,6 +561,77 @@ def _load_supabase_image_candidates(reference_time: datetime) -> tuple[list[dict
                 source="Supabase",
                 content=(
                     f"semiconductor 테이블에서 읽은 이미지 중 {skipped_invalid_paths}건은 "
+                    "image_path 형식이 올바르지 않아 제외했습니다."
+                ),
+                timestamp=reference_time,
+            )
+        )
+
+    discovered_images.sort(key=lambda item: (item["timestamp"], str(item["path"])))
+    return discovered_images, warning_logs
+
+
+def _load_csv_image_candidates(
+    reference_time: datetime,
+    query_date_start: str | None = None,
+    query_date_end: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    rows = _fetch_csv_fallback_rows(query_date_start=query_date_start, query_date_end=query_date_end)
+    discovered_images: list[dict[str, Any]] = []
+    warning_logs: list[dict[str, str]] = []
+    skipped_missing_paths = 0
+    skipped_invalid_paths = 0
+
+    for row in rows:
+        raw_image_path = str(row.get("image_path") or "").strip()
+        if not raw_image_path:
+            skipped_invalid_paths += 1
+            continue
+
+        raw_path = Path(raw_image_path).expanduser()
+        image_path = raw_path if raw_path.is_absolute() else (BASE_DIR / raw_path).resolve()
+
+        if image_path.suffix.lower() not in SUPPORTED_IMAGE_SUFFIXES:
+            skipped_invalid_paths += 1
+            continue
+        if not image_path.exists() or not image_path.is_file():
+            skipped_missing_paths += 1
+            continue
+
+        source_label = _normalize_db_label(row.get("class"), image_path.parent.name)
+        database_predict = str(row.get("predict") or "").strip() or None
+        created_at = _parse_record_timestamp(row.get("created_at"), reference_time)
+        discovered_images.append(
+            {
+                "record_id": row.get("id"),
+                "path": image_path,
+                "source_label": source_label,
+                "database_predict": database_predict,
+                "timestamp": created_at,
+                "dataset_type": str(row.get("type") or "").strip() or None,
+                "trained": bool(row.get("trained", False)),
+            }
+        )
+
+    if skipped_missing_paths:
+        warning_logs.append(
+            _build_log_entry(
+                log_type="Warning",
+                source="CSV",
+                content=(
+                    f"CSV fallback에서 읽은 이미지 중 {skipped_missing_paths}건은 "
+                    "로컬 파일이 없어 제외했습니다."
+                ),
+                timestamp=reference_time,
+            )
+        )
+    if skipped_invalid_paths:
+        warning_logs.append(
+            _build_log_entry(
+                log_type="Warning",
+                source="CSV",
+                content=(
+                    f"CSV fallback에서 읽은 이미지 중 {skipped_invalid_paths}건은 "
                     "image_path 형식이 올바르지 않아 제외했습니다."
                 ),
                 timestamp=reference_time,
@@ -703,7 +911,10 @@ def _predict_dashboard_labels(
 
 
 @st.cache_data(show_spinner=False, ttl=600)
-def load_dashboard_data() -> tuple[
+def load_dashboard_data(
+    query_date_start: str | None = None,
+    query_date_end: str | None = None,
+) -> tuple[
     dict[str, Any],
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -715,28 +926,63 @@ def load_dashboard_data() -> tuple[
     default_model_dir = resolve_base_model_dir(CLASSIFIER_MODEL_DIR)
     data_source = "supabase"
     source_warning_logs: list[dict[str, str]] = []
+
+    effective_query_date_start = query_date_start
+    effective_query_date_end = query_date_end
+    if not effective_query_date_start:
+        session_query_date_start = st.session_state.get("dashboard_query_date_start", "")
+        effective_query_date_start = str(session_query_date_start).strip() or None
+    if not effective_query_date_end:
+        session_query_date_end = st.session_state.get("dashboard_query_date_end", "")
+        effective_query_date_end = str(session_query_date_end).strip() or None
+
     try:
-        discovered_images, source_warning_logs = _load_supabase_image_candidates(now)
+        discovered_images, source_warning_logs = _load_supabase_image_candidates(
+            now,
+            query_date_start=effective_query_date_start,
+            query_date_end=effective_query_date_end,
+        )
     except Exception as exc:
-        data_source = "supabase_unavailable"
-        discovered_images = []
-        source_warning_logs = [
-            _build_log_entry(
-                log_type="Warning",
-                source="Supabase",
-                content=(
-                    "Supabase semiconductor 연동에 실패했고 기존 로컬 fallback은 제거되어 "
-                    "이미지 목록을 비워 둡니다. "
-                    f"error={exc}"
-                ),
-                timestamp=now,
+        try:
+            discovered_images, csv_warning_logs = _load_csv_image_candidates(
+                now,
+                query_date_start=effective_query_date_start,
+                query_date_end=effective_query_date_end,
             )
-        ]
+            data_source = "csv_fallback"
+            source_warning_logs = [
+                _build_log_entry(
+                    log_type="Warning",
+                    source="Supabase",
+                    content=(
+                        "Supabase semiconductor 연동에 실패하여 data/data.csv fallback으로 전환했습니다. "
+                        f"error={exc}"
+                    ),
+                    timestamp=now,
+                ),
+                *csv_warning_logs,
+            ]
+        except Exception as csv_exc:
+            data_source = "supabase_unavailable"
+            discovered_images = []
+            source_warning_logs = [
+                _build_log_entry(
+                    log_type="Warning",
+                    source="Supabase",
+                    content=(
+                        "Supabase semiconductor 연동 실패 후 CSV fallback도 실패했습니다. "
+                        f"supabase_error={exc} | csv_error={csv_exc}"
+                    ),
+                    timestamp=now,
+                )
+            ]
 
     config = {
         "data_source": data_source,
         "supabase_table": SUPABASE_IMAGE_TABLE,
         "supabase_filter": "trained = false",
+        "query_date_start": effective_query_date_start or "all",
+        "query_date_end": effective_query_date_end or "all",
         "model_name": _to_project_relative_path(default_model_dir),
     }
     prediction_warning: dict[str, str] | None = None
@@ -1157,71 +1403,6 @@ def render_page_header(title: str, caption: str | None = None) -> None:
     if caption:
         st.caption(caption)
 
-
-def render_home_page(config: dict[str, Any], runs: list[dict[str, Any]], log_entries: list[dict[str, str]]) -> None:
-    summary_run = build_aggregate_run(runs)
-    label_frame = build_label_distribution_frame(summary_run)
-    render_page_header("Dashboard Home", "Use Streamlit page navigation in the sidebar to move between screens.")
-
-    if summary_run:
-        cols = st.columns(4)
-        cols[0].metric("Total Product", f"{summary_run['total_count']:,}")
-        cols[1].metric("Good", f"{summary_run['good_count']:,}")
-        cols[2].metric("Bad", f"{summary_run['bad_count']:,}")
-        cols[3].metric("Avg Inference", f"{summary_run['average_inference_ms']:.2f} ms")
-        st.caption(f"Aggregated across all runs: {len(runs)} groups, {summary_run['total_count']:,} image files.")
-    else:
-        st.info("No inference result has been loaded yet.")
-
-    st.subheader("Pages")
-    link_cols = st.columns(len(PAGE_LINKS))
-    for idx, (label, target) in enumerate(PAGE_LINKS):
-        with link_cols[idx]:
-            st.page_link(target, label=label, width="stretch")
-
-    with st.container(border=True):
-        st.subheader("All Image Distribution")
-        render_class_distribution_chart(label_frame)
-
-    recent_runs = pd.DataFrame(
-        [
-            {
-                "timestamp": run["timestamp"].strftime("%Y-%m-%d %H:%M:%S"),
-                "total": run["total_count"],
-                "good": run["good_count"],
-                "bad": run["bad_count"],
-                "avg_inference_ms": round(run["average_inference_ms"], 2),
-            }
-            for run in reversed(runs[-5:])
-        ]
-    )
-    key_logs = pd.DataFrame.from_records(
-        log_entries[:5],
-        columns=["date", "time", "source", "log_type", "content"],
-    )
-
-    left_col, right_col = st.columns(2, gap="large")
-    with left_col:
-        with st.container(border=True):
-            st.subheader("Recent Runs")
-            if recent_runs.empty:
-                st.info("No recent runs available.")
-            else:
-                st.dataframe(recent_runs, width="stretch", hide_index=True)
-
-    with right_col:
-        with st.container(border=True):
-            st.subheader("Latest Logs")
-            if key_logs.empty:
-                st.info("No logs available.")
-            else:
-                st.dataframe(key_logs, width="stretch", hide_index=True)
-
-    with st.expander("Current configuration", expanded=False):
-        config_frame = pd.DataFrame(
-            [{"Setting": key, "Value": str(value)} for key, value in config.items()]
-        )
-        st.dataframe(config_frame, width="stretch", hide_index=True)
 
 def build_aggregate_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not runs:

@@ -1,4 +1,4 @@
-
+# Ignore files and directories
 .vscode
 __pycache__
 .fontconfig-cache
@@ -8,6 +8,7 @@ log/*
 output/*
 test
 model/*
+.codex
 
 #secreat
 *.toml

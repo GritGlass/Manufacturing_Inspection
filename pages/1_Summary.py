@@ -42,16 +42,16 @@ def build_overview_frame(latest_run: dict[str, Any] | None) -> pd.DataFrame:
         return pd.DataFrame(
             [
                 {"Metric": "Total Product", "Value": 0},
-                {"Metric": "Good", "Value": 0},
-                {"Metric": "Bad", "Value": 0},
+                {"Metric": "OK", "Value": 0},
+                {"Metric": "NG", "Value": 0},
             ]
         )
 
     return pd.DataFrame(
         [
             {"Metric": "Total Product", "Value": latest_run["total_count"]},
-            {"Metric": "Good", "Value": latest_run["good_count"]},
-            {"Metric": "Bad", "Value": latest_run["bad_count"]},
+            {"Metric": "OK", "Value": latest_run["good_count"]},
+            {"Metric": "NG", "Value": latest_run["bad_count"]},
         ]
     )
 
@@ -380,7 +380,7 @@ def build_summary_pdf_bytes(
                 [name, timestamp, total, good, bad, f"{avg_ms:.2f}", f"{total_ms:.2f}"]
                 for name, timestamp, total, good, bad, avg_ms, total_ms in recent_runs_rows
             ],
-            colLabels=["Name", "Timestamp", "Total", "Good", "Bad", "Avg(ms)", "Total(ms)"],
+            colLabels=["Name", "Timestamp", "Total", "OK", "NG", "Avg(ms)", "Total(ms)"],
             cellLoc="center",
             loc="center",
         )
@@ -538,13 +538,13 @@ def render_summary_page(runs, image_records) -> None:
 
     with right_col:
         total = int(overview_frame.loc[overview_frame["Metric"] == "Total Product", "Value"].iloc[0])
-        good = int(overview_frame.loc[overview_frame["Metric"] == "Good", "Value"].iloc[0])
-        bad = int(overview_frame.loc[overview_frame["Metric"] == "Bad", "Value"].iloc[0])
+        good = int(overview_frame.loc[overview_frame["Metric"] == "OK", "Value"].iloc[0])
+        bad = int(overview_frame.loc[overview_frame["Metric"] == "NG", "Value"].iloc[0])
 
         metric_cols = st.columns(3)
         metric_cols[0].metric("Total", f"{total:,}")
-        metric_cols[1].metric("Good", f"{good:,}")
-        metric_cols[2].metric("Bad", f"{bad:,}")
+        metric_cols[1].metric("OK", f"{good:,}")
+        metric_cols[2].metric("NG", f"{bad:,}")
 
         st.download_button(
             "Download Report",

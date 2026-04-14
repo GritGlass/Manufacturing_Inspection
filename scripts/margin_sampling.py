@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import math
 from pathlib import Path
@@ -16,11 +17,13 @@ except ImportError:
 from scripts.detail_finetune_mcp import resolve_base_model_dir
 
 
+BASE_DIR = Path(__file__).resolve().parents[1]
 SUPABASE_CONNECTION_NAME = "supabase"
 SUPABASE_IMAGE_TABLE = "semiconductor"
 SUPABASE_IMAGE_COLUMNS = "id,image_path,trained,created_at"
 SUPABASE_QUERY_TTL = "0s"
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+CSV_FALLBACK_DATA_PATH = BASE_DIR / "data" / "data.csv"
 
 
 def _suppress_transformers_path_alias_warning() -> None:
@@ -104,8 +107,44 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     return _normalize_row_payload(result)
 
 
+def _fetch_csv_status_rows() -> list[dict[str, Any]]:
+    if not CSV_FALLBACK_DATA_PATH.exists():
+        raise RuntimeError(f"CSV fallback 파일이 없습니다: {CSV_FALLBACK_DATA_PATH}")
+
+    rows: list[dict[str, Any]] = []
+    with CSV_FALLBACK_DATA_PATH.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if not isinstance(row, dict):
+                continue
+            rows.append(
+                {
+                    "id": row.get("id"),
+                    "image_path": row.get("image_path"),
+                    "trained": row.get("trained"),
+                    "created_at": row.get("created_at"),
+                }
+            )
+    return rows
+
+
 def load_supabase_image_status_frame() -> pd.DataFrame:
-    rows = _fetch_supabase_semiconductor_rows()
+    try:
+        rows = _fetch_supabase_semiconductor_rows()
+    except Exception as supabase_error:
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "Margin sampling status source switched to CSV fallback: %s",
+            supabase_error,
+        )
+        try:
+            rows = _fetch_csv_status_rows()
+        except Exception as csv_error:
+            raise RuntimeError(
+                "Supabase와 CSV fallback 모두에서 margin sampling 상태를 불러오지 못했습니다. "
+                f"supabase_error={supabase_error} | csv_error={csv_error}"
+            ) from csv_error
+
     records: list[dict[str, Any]] = []
     for row in rows:
         records.append(

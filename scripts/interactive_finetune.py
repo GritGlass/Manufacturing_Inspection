@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=float, default=2.0)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--repeat-count", type=int, default=16)
+    parser.add_argument("--incremental-only", action="store_true", default=False)
     parser.add_argument(
         "--output-root",
         type=Path,
@@ -255,11 +256,11 @@ def main() -> None:
     config = build_interactive_config(args.base_model_dir, args)
     set_seed(int(config.get("seed", 42)))
 
-    train_records = load_records_csv(args.base_model_dir / "train_split.csv")
+    base_train_records = [] if bool(args.incremental_only) else load_records_csv(args.base_model_dir / "train_split.csv")
     valid_records = load_records_csv(args.base_model_dir / "valid_split.csv")
     test_records = load_records_csv(args.base_model_dir / "test_split.csv")
     train_records = build_augmented_train_records(
-        base_train_records=train_records,
+        base_train_records=base_train_records,
         selected_records=selected_records,
         repeat_count=args.repeat_count,
     )
@@ -288,6 +289,7 @@ def main() -> None:
     device_name = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"TRAIN_DEVICE={device_name}")
+    print(f"TRAIN_MODE={'incremental_only' if args.incremental_only else 'base_plus_selected'}")
     print(f"TRAIN_DATASET_SIZE={len(train_dataset)}")
     print(f"VALID_DATASET_SIZE={len(valid_dataset)}")
     print(f"TEST_DATASET_SIZE={len(test_dataset)}")
@@ -349,6 +351,7 @@ def main() -> None:
             "epochs": args.epochs,
             "learning_rate": args.learning_rate,
             "repeat_count": args.repeat_count,
+            "incremental_only": bool(args.incremental_only),
             "base_model_dir": to_project_relative_path(args.base_model_dir),
             "manual_target_class_input": args.manual_target_class_input or None,
             "selected_class_option": args.selected_class_option or None,

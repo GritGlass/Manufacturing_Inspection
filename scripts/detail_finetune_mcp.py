@@ -599,6 +599,7 @@ def run_detail_finetune_plan(
     log_callback: Callable[[str], None] | None = None,
     use_record_labels: bool = False,
     selection_metadata: dict[str, Any] | None = None,
+    incremental_only: bool = False,
 ) -> DetailFineTuneExecutionResult:
     resolved_base_model_dir = resolve_base_model_dir(base_model_dir)
     INTERACTIVE_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -661,6 +662,8 @@ def run_detail_finetune_plan(
         "--output-root",
         _to_project_relative_path(INTERACTIVE_OUTPUT_ROOT),
     ])
+    if incremental_only:
+        command.append("--incremental-only")
     if manual_target_class_input:
         command.extend(["--manual-target-class-input", manual_target_class_input])
     if selected_class_option:

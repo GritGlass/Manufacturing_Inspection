@@ -4,7 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [v0.2.0] - 2026-04-14
+## [v0.3.0] - 2026-04-14
+
+### Added
+
+* Added XAI (Explainable AI) feature integration
+* Added event logging for dashboard interactions
+* Added data period selector on the Dashboard Home page — users now select a date range from the database before running inference
+
+### Changed
+
+* Revised Dashboard Home workflow: data period selection from DB is now required prior to inference execution
+
+---
+
+## [v0.2.0] - 2026-04-13
 
 ### Added
 

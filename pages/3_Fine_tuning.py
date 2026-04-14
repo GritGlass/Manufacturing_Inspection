@@ -436,6 +436,7 @@ def _render_fine_tuning_training_panel(
     panel: Any | None = None,
     heading: str = "Interactive Fine-tuning",
     has_unsaved_label_changes: bool = False,
+    available_classes: list[str] | None = None,
 ) -> None:
     panel = panel or st
     state_prefix = "fine_tuning_page"
@@ -453,6 +454,49 @@ def _render_fine_tuning_training_panel(
     if selected_records:
         label_counts = Counter(str(record.get("label") or "-") for record in selected_records)
         panel.caption("Saved labels: " + ", ".join(f"{label} {count}장" for label, count in sorted(label_counts.items())))
+
+    resolved_available_classes = [
+        str(label).strip()
+        for label in (available_classes or [])
+        if str(label).strip()
+    ]
+    class_reference_available = bool(resolved_available_classes)
+    selected_label_set = {
+        str(record.get("label") or "").strip()
+        for record in selected_records
+        if str(record.get("label") or "").strip()
+    }
+    has_new_class = class_reference_available and any(
+        label not in resolved_available_classes for label in selected_label_set
+    )
+    if class_reference_available:
+        incremental_selected_records = (
+            list(selected_records)
+            if has_new_class
+            else [record for record in selected_records if not bool(record.get("trained", False))]
+        )
+    else:
+        incremental_selected_records = list(selected_records)
+        if selected_records:
+            panel.info("기존 클래스 목록을 확인하지 못해 선택된 전체 데이터를 학습 대상으로 사용합니다.")
+
+    if not has_new_class and class_reference_available:
+        excluded_count = len(selected_records) - len(incremental_selected_records)
+        panel.caption(
+            "학습 모드: 기존 class 이어학습 (기존 weight 유지 + 추가 데이터만 학습)"
+        )
+        if excluded_count > 0:
+            panel.info(
+                f"이미 학습 반영된 trained=True 이미지 {excluded_count}장은 제외하고 추가 데이터만 학습합니다."
+            )
+    elif has_new_class:
+        panel.caption("학습 모드: 신규 class 포함 (선택한 전체 데이터 학습)")
+
+    if incremental_selected_records and len(incremental_selected_records) < 100:
+        panel.warning(
+            f"현재 fine-tuning 학습 데이터가 {len(incremental_selected_records)}장입니다. "
+            "100장 미만에서는 클래스 편향(bias)이 생길 수 있습니다."
+        )
 
     panel.divider()
     panel.write("Active Learning")
@@ -584,8 +628,10 @@ def _render_fine_tuning_training_panel(
 
     if has_unsaved_label_changes:
         panel.info("왼쪽 `Selected images`의 라벨 변경사항을 저장한 뒤 fine-tuning을 시작하세요.")
+    if selected_records and not incremental_selected_records:
+        panel.warning("신규 class가 없는 상태에서는 trained=False인 추가 데이터가 있어야 fine-tuning을 진행할 수 있습니다.")
 
-    train_disabled = not selected_records or has_unsaved_label_changes
+    train_disabled = not incremental_selected_records or has_unsaved_label_changes
     if panel.button(
         "Start fine-tuning",
         key=f"{state_prefix}_start_{widget_token}",
@@ -604,13 +650,13 @@ def _render_fine_tuning_training_panel(
             )
 
         effective_plan = _build_fine_tuning_plan_from_labels(
-            selected_records=selected_records,
+            selected_records=incremental_selected_records,
             epochs=float(manual_epochs),
             learning_rate=float(manual_learning_rate),
             repeat_count=int(manual_repeat_count),
             preprocessing_method=manual_preprocessing,
         )
-        selection_metadata = _get_fine_tuning_selection_metadata(selected_records, base_model_dir)
+        selection_metadata = _get_fine_tuning_selection_metadata(incremental_selected_records, base_model_dir)
         request_summary = (
             f"base_model={_to_project_relative_path(base_model_dir)}, "
             f"epochs={float(manual_epochs):.1f}, "
@@ -618,7 +664,9 @@ def _render_fine_tuning_training_panel(
             f"repeat_count={int(manual_repeat_count)}, "
             f"preprocessing={manual_preprocessing}, "
             f"selection_strategy={selection_metadata['selection_strategy']}, "
-            f"selected_images={len(selected_records)}"
+            f"selected_images={len(selected_records)}, "
+            f"train_images={len(incremental_selected_records)}, "
+            f"incremental_only={str(not has_new_class).lower()}"
         )
         _append_app_log(
             log_type="start",
@@ -630,13 +678,13 @@ def _render_fine_tuning_training_panel(
                     f"{record.get('display_path', _to_project_relative_path(record['path']))} | "
                     f"predicted={record.get('predicted_label', '-')} | label={record['label']}"
                 )
-                for record in selected_records[:20]
+                for record in incremental_selected_records[:20]
             ),
         )
         with st.spinner("저장된 이미지 라벨을 기준으로 MobileViT 모델을 파인튜닝하는 중입니다..."):
             execution_result = run_detail_finetune_plan(
                 effective_plan,
-                selected_records,
+                incremental_selected_records,
                 [],
                 base_model_dir=base_model_dir,
                 manual_target_class_input=None,
@@ -644,12 +692,13 @@ def _render_fine_tuning_training_panel(
                 log_callback=_update_live_finetune_log,
                 use_record_labels=True,
                 selection_metadata=selection_metadata,
+                incremental_only=not has_new_class,
             )
         supabase_sync_summary = None
         if execution_result.success:
             try:
                 supabase_sync_summary = _sync_fine_tuning_records_to_supabase(
-                    selected_records,
+                    incremental_selected_records,
                     effective_plan,
                     use_record_labels=True,
                 )
@@ -785,6 +834,7 @@ def render_fine_tuning_page(image_records) -> None:
     selected_records = []
     has_unsaved_label_changes = False
     selected_model_dir = None
+    available_classes: list[str] = []
     left_col, right_col = st.columns([1, 1], gap="large")
 
     with left_col:
@@ -965,6 +1015,7 @@ def render_fine_tuning_page(image_records) -> None:
                 panel=st,
                 heading="Interactive Fine-tuning",
                 has_unsaved_label_changes=has_unsaved_label_changes,
+                available_classes=available_classes,
             )
 
 

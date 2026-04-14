@@ -13,6 +13,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT_DIR / "output"
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+OPENXAI_DIR = ROOT_DIR / "third_party" / "OpenXAI"
+if OPENXAI_DIR.exists() and str(OPENXAI_DIR) not in sys.path:
+    sys.path.insert(0, str(OPENXAI_DIR))
 
 from scripts.detail_finetune_mcp import resolve_base_model_dir
 from scripts.utils import (
@@ -330,6 +333,10 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
     st.subheader("3D Model Prediction Visualization")
     st.caption("TensorFlow Projector 스타일의 3D 특성 공간 시각화")
 
+    if len(selected_records) < 3:
+        st.info("3D Visualization을 사용하려면 최소 3개 이상의 이미지를 선택해주세요.")
+        return
+
     image_paths = [record["path"] for record in selected_records if record["exists"]]
     if not image_paths:
         st.warning("표시할 이미지가 없습니다.")
@@ -497,6 +504,256 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
         st.dataframe(details_df, width="stretch")
 
 
+def _resolve_target_label_index(model: Any, label_name: str, input_tensor: Any) -> int:
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("XAI 계산에 필요한 torch 패키지가 없습니다.") from exc
+
+    label2id = getattr(model.config, "label2id", {}) or {}
+    if label_name in label2id:
+        return int(label2id[label_name])
+
+    with torch.no_grad():
+        logits = model(pixel_values=input_tensor).logits
+        return int(logits.argmax(dim=-1).item())
+
+
+def _render_bottom_right_pagination_controls(
+    *,
+    total_items: int,
+    page_key: str,
+    page_size_key: str,
+    default_page_size: int,
+) -> tuple[int, int]:
+    if page_size_key not in st.session_state:
+        st.session_state[page_size_key] = int(default_page_size)
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 1
+
+    page_size = int(st.session_state[page_size_key])
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    current_page = int(st.session_state[page_key])
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state[page_key] = current_page
+
+    spacer, controls_col = st.columns([6, 4], gap="small")
+    with spacer:
+        st.empty()
+    with controls_col:
+        label_cols = st.columns([2, 2], gap="small")
+        with label_cols[0]:
+            st.caption("Page")
+            page_cols = st.columns([2, 1, 1], gap="small")
+            with page_cols[0]:
+                st.text_input(
+                    "현재 페이지",
+                    value=str(current_page),
+                    key=f"{page_key}_display",
+                    label_visibility="collapsed",
+                    disabled=True,
+                )
+            with page_cols[1]:
+                if st.button("-", key=f"{page_key}_minus", width="stretch"):
+                    st.session_state[page_key] = max(1, current_page - 1)
+                    st.rerun()
+            with page_cols[2]:
+                if st.button("+", key=f"{page_key}_plus", width="stretch"):
+                    st.session_state[page_key] = min(total_pages, current_page + 1)
+                    st.rerun()
+
+        with label_cols[1]:
+            st.caption("Page Size")
+            st.text_input(
+                "최대 페이지",
+                value=str(total_pages),
+                key=f"{page_size_key}_max_page_display",
+                label_visibility="collapsed",
+                disabled=True,
+            )
+
+    page_size = int(st.session_state[page_size_key])
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    current_page = int(st.session_state[page_key])
+    st.session_state[page_key] = max(1, min(current_page, total_pages))
+    return st.session_state[page_key], page_size
+
+
+def _render_detail_xai_visualization(selected_records: list[dict[str, Any]], selected_model_dir: Path | None) -> None:
+    try:
+        import numpy as np
+        import torch
+        import torch.nn.functional as F
+        from PIL import Image
+        from matplotlib import colormaps
+        from openxai import Explainer
+    except ImportError as exc:
+        st.error(
+            "XAI 시각화에 필요한 패키지를 불러오지 못했습니다. "
+            "`captum` 및 OpenXAI 의존성이 설치되어 있는지 확인해주세요."
+        )
+        st.caption(f"Import error: {exc}")
+        return
+
+    st.subheader("XAI Visualization (OpenXAI)")
+    st.caption("OpenXAI attribution을 기반으로 원본 이미지 위에 히트맵을 오버레이합니다.")
+
+    if not selected_records:
+        st.info("XAI를 표시할 이미지가 없습니다.")
+        return
+
+    if selected_model_dir is None:
+        st.info("먼저 사이드바에서 추론 모델을 선택해주세요.")
+        return
+
+    openxai_methods = ["grad", "sg", "itg", "ig", "lime", "shap", "control"]
+    supported_methods = {"grad", "sg", "itg", "ig"}
+    selected_method = st.selectbox(
+        "OpenXAI method",
+        options=openxai_methods,
+        index=0,
+        key="detail_xai_method_selector",
+        help="현재 이미지 분류 모델에서는 grad/sg/itg/ig를 권장합니다.",
+    )
+    overlay_alpha = st.slider(
+        "히트맵 오버레이 강도",
+        min_value=0.1,
+        max_value=0.9,
+        value=0.45,
+        step=0.05,
+        key="detail_xai_overlay_alpha",
+    )
+    colormap_name = st.selectbox(
+        "히트맵 컬러맵",
+        options=["turbo", "jet", "magma", "viridis"],
+        index=0,
+        key="detail_xai_colormap",
+    )
+
+    if selected_method not in supported_methods:
+        st.warning(
+            "선택한 method는 현재 이미지 모델 파이프라인에서 바로 지원되지 않습니다. "
+            "`grad`, `sg`, `itg`, `ig` 중에서 선택해주세요."
+        )
+        return
+
+    valid_records = [record for record in selected_records if record.get("exists")]
+    if not valid_records:
+        st.info("존재하는 이미지가 없어 XAI를 계산할 수 없습니다.")
+        return
+
+    total_images = len(valid_records)
+    current_xai_page = int(st.session_state.get("detail_xai_page", 1))
+    xai_page_size = int(st.session_state.get("detail_xai_page_size", 5))
+    xai_total_pages = max(1, (total_images + xai_page_size - 1) // xai_page_size)
+    current_xai_page = max(1, min(current_xai_page, xai_total_pages))
+    st.session_state["detail_xai_page"] = current_xai_page
+    st.session_state["detail_xai_page_size"] = xai_page_size
+    st.caption(f"전체 {total_images}개 이미지에 대해 XAI 수행 | {current_xai_page}/{xai_total_pages} 페이지")
+
+    try:
+        image_processor, base_model, device_name, _ = _load_detail_classifier_runtime(selected_model_dir)
+        device = torch.device(device_name)
+
+        class _OpenXAILogitsModel(torch.nn.Module):
+            def __init__(self, model: Any) -> None:
+                super().__init__()
+                self.model = model
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                output = self.model(pixel_values=x)
+                return output.logits if hasattr(output, "logits") else output
+
+        openxai_model = _OpenXAILogitsModel(base_model).to(device)
+        explainer = Explainer(method=selected_method, model=openxai_model)
+    except Exception as exc:
+        st.error(f"OpenXAI explainer 초기화에 실패했습니다: {exc}")
+        return
+
+    cmap = colormaps.get_cmap(colormap_name)
+    xai_errors: list[str] = []
+    page_items: list[dict[str, Any]] = []
+
+    page_start = (current_xai_page - 1) * xai_page_size
+    page_end = page_start + xai_page_size
+
+    for index, record in enumerate(valid_records):
+        image_path = record["path"]
+        filename = record.get("filename", Path(image_path).name)
+        try:
+            with Image.open(image_path) as image:
+                rgb_image = image.convert("RGB")
+            original_np = np.asarray(rgb_image).astype(np.float32) / 255.0
+            height, width = original_np.shape[:2]
+
+            model_inputs = image_processor(images=rgb_image, return_tensors="pt")
+            pixel_values = model_inputs["pixel_values"].to(device)
+            pixel_values = pixel_values.requires_grad_(True)
+
+            target_idx = _resolve_target_label_index(base_model, str(record["label"]), pixel_values)
+            target_tensor = torch.tensor([target_idx], dtype=torch.long, device=device)
+
+            attribution = explainer.get_explanations(pixel_values, target_tensor)
+            attribution = attribution.detach().to("cpu")
+
+            if attribution.ndim == 4:
+                attribution_map = attribution[0].abs().mean(dim=0)
+            elif attribution.ndim == 3:
+                attribution_map = attribution[0].abs()
+            else:
+                raise ValueError(f"예상하지 못한 attribution shape: {tuple(attribution.shape)}")
+
+            attribution_map = attribution_map.unsqueeze(0).unsqueeze(0)
+            attribution_map = F.interpolate(
+                attribution_map,
+                size=(height, width),
+                mode="bilinear",
+                align_corners=False,
+            )[0, 0].numpy()
+
+            attribution_min = float(attribution_map.min())
+            attribution_max = float(attribution_map.max())
+            normalized = (attribution_map - attribution_min) / (attribution_max - attribution_min + 1e-8)
+
+            heatmap_rgb = cmap(normalized)[..., :3]
+            overlay = np.clip((1.0 - overlay_alpha) * original_np + overlay_alpha * heatmap_rgb, 0.0, 1.0)
+
+            if page_start <= index < page_end:
+                page_items.append(
+                    {
+                        "filename": filename,
+                        "label": record["label"],
+                        "target_idx": target_idx,
+                        "original": (original_np * 255).astype(np.uint8),
+                        "heatmap": (heatmap_rgb * 255).astype(np.uint8),
+                        "overlay": (overlay * 255).astype(np.uint8),
+                    }
+                )
+        except Exception as exc:
+            xai_errors.append(f"{filename}: {exc}")
+
+    for item in page_items:
+        st.markdown(f"**{item['filename']}**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.image(item["original"], caption="Original", width="stretch")
+        with c2:
+            st.image(item["heatmap"], caption=f"XAI ({selected_method})", width="stretch")
+        with c3:
+            st.image(item["overlay"], caption="Overlay", width="stretch")
+        st.caption(f"Prediction: {item['label']} | target_id: {item['target_idx']}")
+
+    _render_bottom_right_pagination_controls(
+        total_items=total_images,
+        page_key="detail_xai_page",
+        page_size_key="detail_xai_page_size",
+        default_page_size=5,
+    )
+
+    if xai_errors:
+        st.warning("일부 XAI 계산에 실패했습니다: " + "; ".join(xai_errors[:3]))
+
+
 def render_detail_page(image_records) -> None:
     render_page_header("Detail")
     all_dates = ["All dates"] + sorted({record["date"] for record in image_records}, reverse=True)
@@ -579,13 +836,27 @@ def render_detail_page(image_records) -> None:
             st.caption(f"Saved inference results: {_to_project_relative_path(artifact_paths['results_path'])}")
             st.caption(f"Saved inference timing: {_to_project_relative_path(artifact_paths['timing_path'])}")
 
-        tab1, tab2 = st.tabs(["Result", "3D Visualization"])
+        tab1, tab2, tab3 = st.tabs(["Result", "3D Visualization", "XAI"])
 
         with tab1:
-            with st.expander(f"Selected images ({len(selected_records)})", expanded=True):
-                cols = st.columns(min(len(selected_records), 3), gap="large")
-                for idx, record in enumerate(selected_records):
-                    with cols[idx % len(cols)]:
+            result_total = len(selected_records)
+            current_result_page = int(st.session_state.get("detail_result_page", 1))
+            result_page_size = int(st.session_state.get("detail_result_page_size", 25))
+            result_total_pages = max(1, (result_total + result_page_size - 1) // result_page_size)
+            current_result_page = max(1, min(current_result_page, result_total_pages))
+            st.session_state["detail_result_page"] = current_result_page
+            st.session_state["detail_result_page_size"] = result_page_size
+
+            result_start = (current_result_page - 1) * result_page_size
+            result_end = result_start + result_page_size
+            page_records = selected_records[result_start:result_end]
+
+            st.caption(f"전체 {result_total}개 이미지 | {current_result_page}/{result_total_pages} 페이지")
+
+            with st.expander(f"Selected images ({len(page_records)}/{result_total})", expanded=True):
+                cols = st.columns(5, gap="large")
+                for idx, record in enumerate(page_records):
+                    with cols[idx % 5]:
                         if record["exists"]:
                             st.image(record["path"], width="stretch")
                         else:
@@ -593,8 +864,21 @@ def render_detail_page(image_records) -> None:
                         st.caption(record["filename"])
                         st.caption(f"Prediction: {record['label']}")
 
+            _render_bottom_right_pagination_controls(
+                total_items=result_total,
+                page_key="detail_result_page",
+                page_size_key="detail_result_page_size",
+                default_page_size=25,
+            )
+
         with tab2:
-            _render_detail_3d_visualization(selected_records)
+            if len(selected_records) < 3:
+                st.info("3D Visualization을 사용하려면 최소 3개 이상의 이미지를 선택해주세요.")
+            else:
+                _render_detail_3d_visualization(selected_records)
+
+        with tab3:
+            _render_detail_xai_visualization(selected_records, selected_model_dir)
     else:
         st.info("여러 이미지를 선택하려면 위에서 항목을 여러 개 선택하세요.")
 
