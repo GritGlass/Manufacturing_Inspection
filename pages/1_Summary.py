@@ -166,7 +166,16 @@ def select_summary_report_image_records(image_records: list[dict[str, Any]]) -> 
     if not records_by_label:
         return []
 
-    ordered_labels = [label for label in CLASS_VISUALIZATION_ORDER if label in records_by_label]
+    ordered_labels: list[str] = []
+    if "Normal" in records_by_label:
+        ordered_labels.append("Normal")
+    ordered_labels.extend(
+        [
+            label
+            for label in CLASS_VISUALIZATION_ORDER
+            if label in records_by_label and label != "Normal"
+        ]
+    )
     ordered_labels.extend(sorted(set(records_by_label) - set(ordered_labels)))
 
     selected_records: list[dict[str, Any]] = []
@@ -277,6 +286,15 @@ def _wrap_text_lines(text: str, width: int = 42) -> str:
     return "\n".join(paragraphs)
 
 
+def _sanitize_analysis_comment(text: str) -> str:
+    cleaned_lines = [
+        line for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    cleaned = "\n".join(cleaned_lines).strip()
+    return cleaned if cleaned else "Analysis comment is not available."
+
+
 def _prepare_pdf_runtime() -> tuple[Any, Any, Any, Any]:
     cache_dir = BASE_DIR / ".matplotlib-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -335,15 +353,65 @@ def build_summary_pdf_bytes(
     with PdfPages(pdf_buffer) as pdf:
         trend_map = {title.lower(): points for title, points in trend_rows}
 
-        def _sanitize_analysis_comment(text: str) -> str:
-            cleaned_lines = [
-                line for line in text.splitlines()
-                if not line.lstrip().startswith("#")
-            ]
-            cleaned = "\n".join(cleaned_lines).strip()
-            return cleaned if cleaned else "Analysis comment is not available."
+        def _infer_quality_grade(text: str) -> str:
+            metrics = {str(metric): int(value) for metric, value in overview_rows}
+            total_count = max(int(metrics.get("Total Product", 0)), 1)
+            bad_count = max(int(metrics.get("NG", 0)), 0)
+            bad_ratio = bad_count / total_count
+
+            grade_steps = ["A+", "A", "B+", "B", "F"]
+            if bad_ratio <= 0.05:
+                grade_index = 0
+            elif bad_ratio <= 0.15:
+                grade_index = 1
+            elif bad_ratio <= 0.30:
+                grade_index = 2
+            elif bad_ratio <= 0.50:
+                grade_index = 3
+            else:
+                grade_index = 4
+
+            normalized = text.lower()
+            negative_keywords = (
+                "very poor",
+                "poor",
+                "defect",
+                "high",
+                "critical",
+                "unstable",
+                "불량",
+                "위험",
+                "심각",
+                "문제",
+            )
+            positive_keywords = (
+                "excellent",
+                "good",
+                "stable",
+                "improved",
+                "양호",
+                "안정",
+                "정상",
+                "개선",
+            )
+
+            negative_hits = sum(1 for keyword in negative_keywords if keyword in normalized)
+            positive_hits = sum(1 for keyword in positive_keywords if keyword in normalized)
+
+            if negative_hits - positive_hits >= 2:
+                grade_index = min(grade_index + 1, len(grade_steps) - 1)
+            elif positive_hits - negative_hits >= 3 and bad_ratio < 0.10:
+                grade_index = max(grade_index - 1, 0)
+
+            if bad_ratio >= 0.70 or (
+                bad_ratio >= 0.50 and negative_hits >= 3 and positive_hits == 0
+            ):
+                grade_index = len(grade_steps) - 1
+
+            return grade_steps[grade_index]
 
         cleaned_analysis_comment = _sanitize_analysis_comment(analysis_comment)
+        quality_grade = _infer_quality_grade(cleaned_analysis_comment)
 
         def _get_trend_points(keyword: str) -> tuple[tuple[str, int], ...]:
             for title, points in trend_map.items():
@@ -379,6 +447,42 @@ def build_summary_pdf_bytes(
 
         fig = plt.figure(figsize=(8.27, 11.69))
         fig.suptitle("Report", fontsize=16, fontproperties=font_prop, y=0.965)
+        badge_center_x, badge_center_y = 0.126, 0.939
+        badge_radius = 0.06
+        badge_ax = fig.add_axes(
+            [
+                badge_center_x - badge_radius,
+                badge_center_y - badge_radius,
+                badge_radius * 2,
+                badge_radius * 2,
+            ]
+        )
+        badge_ax.set_aspect("equal")
+        badge_ax.set_axis_off()
+        from matplotlib.patches import Circle
+
+        badge_ax.add_patch(
+            Circle(
+                (0.5, 0.5),
+                radius=0.48,
+                transform=badge_ax.transAxes,
+                fill=False,
+                edgecolor="#D32F2F",
+                linewidth=3.2,
+            )
+        )
+        badge_ax.text(
+            0.5,
+            0.5,
+            quality_grade,
+            fontsize=33,
+            fontproperties=font_prop,
+            color="#D32F2F",
+            weight="bold",
+            ha="center",
+            va="center",
+            transform=badge_ax.transAxes,
+        )
         fig.text(0.95, 0.92, f"Period : {period_range}", fontsize=9, fontproperties=font_prop, ha="right")
 
         fig.text(0.08, 0.865, "• Product Amount", fontsize=11, fontproperties=font_prop, weight="bold")
@@ -711,14 +815,14 @@ def render_summary_page(runs, image_records) -> None:
                 st.line_chart(frame, width="stretch")
 
     with st.container(border=True):
-        st.subheader("AI analysis comment")
+        st.subheader("anlysis")
         if summary_run:
             if analysis_comment.startswith("LLM 분석 코멘트 생성 중 오류") or analysis_comment.startswith("로컬 Gemma 모델이"):
                 st.warning(analysis_comment)
             elif analysis_comment.startswith("로컬 Gemma 실행에 필요한 패키지"):
                 st.warning(analysis_comment)
             else:
-                st.write(analysis_comment)
+                st.write(_sanitize_analysis_comment(analysis_comment))
         else:
             st.info("분석할 Summary 데이터가 없습니다.")
 

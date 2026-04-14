@@ -1141,7 +1141,7 @@ def render_class_distribution_chart(label_frame: pd.DataFrame, container: Any | 
                 marker_color=[color_map.get(label, "#5B8FF9") for label in labels],
                 text=bar_text,
                 textposition="inside",
-                textangle=90,
+                textangle=-90,
                 insidetextanchor="middle",
                 textfont=dict(size=14),
                 hovertemplate="Class: %{x}<br>Count: %{y}<br>Ratio: %{text}<extra></extra>",
