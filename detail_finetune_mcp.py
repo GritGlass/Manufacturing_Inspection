@@ -1,0 +1,778 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+
+from local_gemma_model import are_runtime_dependencies_available, generate_response, is_model_downloaded
+from local_gemma_model import unload_model
+
+
+BASE_DIR = Path(__file__).resolve().parent
+CLASSIFICATION_MODEL_ROOT = BASE_DIR / "model" / "classification"
+CLASSIFIER_MODEL_DIR = CLASSIFICATION_MODEL_ROOT / "mobilevit_small_9_classifier"
+INTERACTIVE_FINETUNE_SCRIPT = BASE_DIR / "scripts" / "interactive_finetune.py"
+INTERACTIVE_OUTPUT_ROOT = BASE_DIR / "model"
+TRAINING_CONFIG_PATH = BASE_DIR / "data" / "semicondotor_seg_data_path.json"
+DETAIL_FINETUNE_SYSTEM_PROMPT = """당신은 반도체 이미지 분류 모델 파인튜닝 코치입니다.
+반드시 한국어로만 답변하세요.
+당신의 역할은 사용자가 선택한 이미지들에 대해 어떤 클래스로 다시 학습할지 정리하고, 안전한 파인튜닝 계획을 제안하는 것입니다.
+새로운 클래스를 생성할 수도 있습니다.
+당신은 영상 전처리 방법도 제안할 수 있습니다 (none, light_augmentation, medium_augmentation, heavy_augmentation, histogram_equalization, denoise).
+반드시 JSON 객체 하나만 출력하세요.
+JSON 스키마:
+{
+  "assistant_reply": "사용자에게 보여줄 한국어 답변",
+  "target_label": "Center|Donut|Edge-Loc|Edge-Ring|Local|Near-Full|Normal|Scratch 또는 null",
+  "create_new_class": false,
+  "new_class_name": "새로운 클래스 이름 또는 null",
+  "preprocessing_method": "none|light_augmentation|medium_augmentation|heavy_augmentation|histogram_equalization|denoise",
+  "epochs": 1.0에서 5.0 사이 숫자,
+  "learning_rate": 0.000001에서 0.0001 사이 숫자,
+  "repeat_count": 4에서 64 사이 정수,
+  "ready_to_train": true 또는 false,
+  "notes": "짧은 내부 메모"
+}
+규칙:
+- 사용자가 클래스나 목적을 아직 명확히 말하지 않았다면 ready_to_train=false로 두고 짧게 되물어야 합니다.
+- 기존 클래스로 충분하면 target_label을 선택하고 create_new_class=false로 두세요.
+- 존재하지 않는 새로운 클래스가 필요하면 create_new_class=true로 두고 new_class_name에 클래스 이름을 입력하세요.
+- 새로운 클래스를 생성할 때는 target_label을 null로 두세요.
+- new_class_name은 영문자, 숫자, 하이픈(_)만 사용하고 공백은 금지입니다.- 전처리 방법:
+  * none: 전처리 없음
+  * light_augmentation: 가벼운 증강 (±10도 회전, 수평 뒷집기)
+  * medium_augmentation: 중간 증강 (±20도 회전, 뒯집기, 밝기 ±10%)
+  * heavy_augmentation: 강한 증강 (±30도 회전, 뒯집기, 밝기/대비 ±20%)
+  * histogram_equalization: 히스토그램 균등화 (명도 불균형 개선)
+  * denoise: 잡음 제거 (노이즈가 있는 이미지)
+- 영상이 노이즈가 많으면 denoise를, 어두운 부분과 밝은 부분이 섞여있으면 histogram_equalization을 제안하세요.- epochs, learning_rate, repeat_count는 과도하지 않게 보수적으로 제안하세요.
+- JSON 바깥의 설명 문장은 절대 출력하지 마세요."""
+
+
+def _resolve_project_path(value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    raw_value = str(value).strip()
+    if not raw_value:
+        return None
+    path = Path(raw_value).expanduser()
+    if path.is_absolute():
+        return path
+    return (BASE_DIR / path).resolve()
+
+
+def _to_project_relative_path(value: str | Path | None) -> str:
+    if value is None:
+        return "-"
+    raw_value = str(value).strip()
+    if not raw_value:
+        return "-"
+    path = Path(raw_value).expanduser()
+    absolute_path = path if path.is_absolute() else (BASE_DIR / path).resolve()
+    return os.path.relpath(str(absolute_path), str(BASE_DIR))
+
+
+def _normalize_record_for_artifact(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    if normalized.get("path"):
+        normalized["path"] = _to_project_relative_path(normalized["path"])
+    if normalized.get("display_path"):
+        normalized["display_path"] = _to_project_relative_path(normalized["display_path"])
+    if normalized.get("model_dir"):
+        normalized["model_dir"] = _to_project_relative_path(normalized["model_dir"])
+    if normalized.get("model_dir_display"):
+        normalized["model_dir_display"] = _to_project_relative_path(normalized["model_dir_display"])
+    return normalized
+
+
+@dataclass
+class DetailFineTunePlan:
+    assistant_reply: str
+    target_label: str | None
+    epochs: float
+    learning_rate: float
+    repeat_count: int
+    ready_to_train: bool
+    create_new_class: bool = False
+    new_class_name: str | None = None
+    preprocessing_method: str = "none"
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DetailFineTuneExecutionResult:
+    success: bool
+    command: list[str]
+    output_dir: str | None
+    llm_comment_path: str | None
+    selected_images_path: str | None
+    context_json_path: str | None
+    audit_log_json_path: str | None
+    audit_log_text_path: str | None
+    stdout: str
+    stderr: str
+    returncode: int
+
+
+def _is_valid_classifier_model_dir(candidate: Path) -> bool:
+    required_files = (
+        "model.safetensors",
+        "config.json",
+        "preprocessor_config.json",
+        "label2id.json",
+    )
+    return candidate.is_dir() and all((candidate / filename).exists() for filename in required_files)
+
+
+def resolve_base_model_dir(model_dir: str | Path | None = None) -> Path:
+    candidate = _resolve_project_path(model_dir) if model_dir else CLASSIFIER_MODEL_DIR
+    assert candidate is not None
+    if candidate.is_file() and candidate.name == "model.safetensors":
+        candidate = candidate.parent
+
+    candidate_options: list[Path] = [candidate]
+    if candidate.name:
+        candidate_options.append(CLASSIFICATION_MODEL_ROOT / candidate.name)
+
+    for current_candidate in candidate_options:
+        if _is_valid_classifier_model_dir(current_candidate):
+            return current_candidate
+
+    if _is_valid_classifier_model_dir(CLASSIFIER_MODEL_DIR):
+        return CLASSIFIER_MODEL_DIR
+
+    if CLASSIFICATION_MODEL_ROOT.exists():
+        available_model_dirs = sorted(
+            path for path in CLASSIFICATION_MODEL_ROOT.iterdir() if _is_valid_classifier_model_dir(path)
+        )
+        if available_model_dirs:
+            return available_model_dirs[0]
+
+    return candidate
+
+
+def load_available_classes(model_dir: Path | str | None = None) -> list[str]:
+    resolved_model_dir = resolve_base_model_dir(model_dir)
+    label2id_path = resolved_model_dir / "label2id.json"
+    if not label2id_path.exists():
+        raise FileNotFoundError(f"Label mapping file does not exist: {label2id_path}")
+
+    label2id = json.loads(label2id_path.read_text(encoding="utf-8"))
+    if not isinstance(label2id, dict) or not label2id:
+        raise ValueError(f"Invalid label mapping in: {label2id_path}")
+    return list(label2id.keys())
+
+
+def build_detail_transcript(chat_history: list[dict[str, str]]) -> str:
+    if not chat_history:
+        return "대화 기록 없음"
+    return "\n".join(f"{message['role']}: {message['content']}" for message in chat_history)
+
+
+def save_detail_comment_file(
+    output_dir: Path,
+    plan: DetailFineTunePlan,
+    selected_records: list[dict[str, Any]],
+    chat_history: list[dict[str, str]],
+    base_model_dir: Path,
+    manual_target_class_input: str | None = None,
+    selected_class_option: str | None = None,
+) -> Path:
+    selected_lines: list[str] = []
+    for record in selected_records:
+        assigned_label = str(record.get("assigned_label") or record.get("label") or "-")
+        predicted_label = str(record.get("predicted_label") or assigned_label or "-")
+        line = (
+            f"- {record['filename']} | predicted={predicted_label} | "
+            f"assigned={assigned_label} | path={_to_project_relative_path(record['path'])}"
+        )
+        selected_lines.append(line)
+    target_label = plan.new_class_name if plan.create_new_class else plan.target_label
+    content = "\n".join(
+        [
+            f"saved_at: {datetime.now().isoformat(timespec='seconds')}",
+            f"base_model_dir: {_to_project_relative_path(base_model_dir)}",
+            f"target_label: {target_label or '-'}",
+            f"manual_target_class_input: {manual_target_class_input or '-'}",
+            f"selected_class_option: {selected_class_option or '-'}",
+            f"create_new_class: {plan.create_new_class}",
+            f"preprocessing_method: {plan.preprocessing_method}",
+            f"epochs: {plan.epochs}",
+            f"learning_rate: {plan.learning_rate}",
+            f"repeat_count: {plan.repeat_count}",
+            f"notes: {plan.notes or '-'}",
+            "",
+            "[assistant_reply]",
+            plan.assistant_reply,
+            "",
+            "[selected_records]",
+            *selected_lines,
+            "",
+            "[chat_history]",
+            build_detail_transcript(chat_history),
+        ]
+    )
+    comment_path = output_dir / "llm_comment.txt"
+    comment_path.write_text(content, encoding="utf-8")
+    return comment_path
+
+
+def save_selected_images_file(output_dir: Path, selected_records: list[dict[str, Any]]) -> Path:
+    image_list_content = "\n".join(_to_project_relative_path(record["path"]) for record in selected_records)
+    image_list_path = output_dir / "selected_images.txt"
+    image_list_path.write_text(image_list_content + ("\n" if image_list_content else ""), encoding="utf-8")
+    return image_list_path
+
+
+def _make_json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_make_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_make_json_safe(item) for item in value]
+    return value
+
+
+def save_detail_context_json(
+    output_dir: Path,
+    plan: DetailFineTunePlan,
+    selected_records: list[dict[str, Any]],
+    chat_history: list[dict[str, str]],
+    base_model_dir: Path,
+    manual_target_class_input: str | None = None,
+    selected_class_option: str | None = None,
+) -> Path:
+    context_payload = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "base_model_dir": _to_project_relative_path(base_model_dir),
+        "plan": plan.to_dict(),
+        "manual_target_class_input": manual_target_class_input,
+        "selected_class_option": selected_class_option,
+        "selected_records": [_normalize_record_for_artifact(record) for record in selected_records],
+        "chat_history": chat_history,
+    }
+    context_path = output_dir / "detail_finetune_context.json"
+    context_path.write_text(
+        json.dumps(_make_json_safe(context_payload), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return context_path
+
+
+def save_detail_audit_logs(
+    output_dir: Path,
+    plan: DetailFineTunePlan,
+    selected_records: list[dict[str, Any]],
+    base_model_dir: Path,
+    saved_model_dir: Path,
+    command: list[str],
+    success: bool,
+    returncode: int,
+    manual_target_class_input: str | None = None,
+    selected_class_option: str | None = None,
+    selection_metadata: dict[str, Any] | None = None,
+) -> tuple[Path, Path]:
+    metadata = dict(selection_metadata or {})
+    selection_strategy = str(metadata.get("selection_strategy") or "Manual Selection").strip() or "Manual Selection"
+    selection_origin = str(metadata.get("selection_origin") or "manual").strip() or "manual"
+    selection_notice = str(metadata.get("selection_notice") or "").strip() or None
+    selection_percentage = metadata.get("selection_percentage")
+
+    normalized_records: list[dict[str, Any]] = []
+    for index, record in enumerate(selected_records, start=1):
+        normalized_record = {
+            "index": index,
+            "filename": str(record.get("filename") or Path(str(record["path"])).name),
+            "path": _to_project_relative_path(record["path"]),
+            "predicted_label": str(record.get("predicted_label") or record.get("label") or "-"),
+            "assigned_label": str(record.get("assigned_label") or record.get("label") or "-"),
+            "trained_before_finetuning": bool(record.get("trained", False)),
+            "record_id": record.get("record_id"),
+            "source_label": str(record.get("source_label") or "").strip() or None,
+        }
+        normalized_records.append(normalized_record)
+
+    audit_payload = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "success": bool(success),
+        "returncode": int(returncode),
+        "selection_strategy": selection_strategy,
+        "selection_origin": selection_origin,
+        "selection_notice": selection_notice,
+        "selection_percentage": selection_percentage,
+        "base_model_name": base_model_dir.name,
+        "base_model_dir": _to_project_relative_path(base_model_dir),
+        "trained_model_name": saved_model_dir.name,
+        "trained_model_dir": _to_project_relative_path(saved_model_dir),
+        "target_label": plan.new_class_name if plan.create_new_class else plan.target_label,
+        "create_new_class": bool(plan.create_new_class),
+        "manual_target_class_input": manual_target_class_input,
+        "selected_class_option": selected_class_option,
+        "preprocessing_method": plan.preprocessing_method,
+        "epochs": float(plan.epochs),
+        "learning_rate": float(plan.learning_rate),
+        "repeat_count": int(plan.repeat_count),
+        "command": list(command),
+        "selected_record_count": len(normalized_records),
+        "selected_records": normalized_records,
+        "extra_metadata": _make_json_safe(metadata),
+    }
+
+    audit_json_path = output_dir / "fine_tuning_audit_log.json"
+    audit_json_path.write_text(
+        json.dumps(_make_json_safe(audit_payload), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    text_lines = [
+        f"saved_at: {audit_payload['saved_at']}",
+        f"success: {audit_payload['success']}",
+        f"returncode: {audit_payload['returncode']}",
+        f"selection_strategy: {selection_strategy}",
+        f"selection_origin: {selection_origin}",
+        f"selection_notice: {selection_notice or '-'}",
+        f"selection_percentage: {selection_percentage if selection_percentage is not None else '-'}",
+        f"base_model_name: {base_model_dir.name}",
+        f"base_model_dir: {_to_project_relative_path(base_model_dir)}",
+        f"trained_model_name: {saved_model_dir.name}",
+        f"trained_model_dir: {_to_project_relative_path(saved_model_dir)}",
+        f"target_label: {audit_payload['target_label'] or '-'}",
+        f"manual_target_class_input: {manual_target_class_input or '-'}",
+        f"selected_class_option: {selected_class_option or '-'}",
+        f"preprocessing_method: {plan.preprocessing_method}",
+        f"epochs: {plan.epochs}",
+        f"learning_rate: {plan.learning_rate}",
+        f"repeat_count: {plan.repeat_count}",
+        f"selected_record_count: {len(normalized_records)}",
+        "",
+        "[selected_records]",
+    ]
+    for record in normalized_records:
+        text_lines.append(
+            f"- {record['filename']} | predicted={record['predicted_label']} | "
+            f"assigned={record['assigned_label']} | trained_before={record['trained_before_finetuning']} | "
+            f"path={record['path']}"
+        )
+    text_lines.extend(
+        [
+            "",
+            "[command]",
+            " ".join(command),
+        ]
+    )
+
+    audit_text_path = output_dir / "fine_tuning_audit_log.txt"
+    audit_text_path.write_text("\n".join(text_lines) + "\n", encoding="utf-8")
+    return audit_json_path, audit_text_path
+
+
+def _extract_json_payload(raw_text: str) -> dict[str, Any]:
+    fenced_match = re.search(r"```json\s*(\{.*?\})\s*```", raw_text, flags=re.DOTALL)
+    if fenced_match:
+        return json.loads(fenced_match.group(1))
+
+    start_index = raw_text.find("{")
+    end_index = raw_text.rfind("}")
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        raise ValueError("LLM response did not include a JSON object.")
+
+    return json.loads(raw_text[start_index : end_index + 1])
+
+
+def _clamp_float(value: Any, minimum: float, maximum: float, fallback: float) -> float:
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, numeric_value))
+
+
+def _clamp_int(value: Any, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        numeric_value = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, numeric_value))
+
+
+def _is_out_of_memory_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return exc.__class__.__name__ == "OutOfMemoryError" or "out of memory" in message
+
+
+def parse_detail_finetune_plan(raw_text: str, available_classes: list[str]) -> DetailFineTunePlan:
+    payload = _extract_json_payload(raw_text)
+    target_label = payload.get("target_label")
+    if target_label and target_label not in available_classes:
+        target_label = None
+
+    create_new_class = bool(payload.get("create_new_class", False))
+    new_class_name = str(payload.get("new_class_name", "")).strip() if payload.get("new_class_name") else None
+    if create_new_class and new_class_name:
+        new_class_name = new_class_name.replace(" ", "_").replace("-", "_")
+    else:
+        new_class_name = None
+
+    preprocessing_method = str(payload.get("preprocessing_method", "none")).strip().lower()
+    valid_methods = ["none", "light_augmentation", "medium_augmentation", "heavy_augmentation", "histogram_equalization", "denoise"]
+    if preprocessing_method not in valid_methods:
+        preprocessing_method = "none"
+
+    reply = str(payload.get("assistant_reply", "")).strip()
+    if not reply:
+        reply = "재학습 계획을 다시 설명해 주세요."
+
+    ready_to_train = bool(payload.get("ready_to_train", False)) and (target_label is not None or new_class_name is not None)
+    if not ready_to_train and target_label is None and new_class_name is None and "클래스" not in reply:
+        reply = "이 이미지를 어떤 클래스로 다시 학습할지 알려주세요."
+
+    return DetailFineTunePlan(
+        assistant_reply=reply,
+        target_label=target_label,
+        epochs=_clamp_float(payload.get("epochs"), minimum=1.0, maximum=5.0, fallback=2.0),
+        learning_rate=_clamp_float(payload.get("learning_rate"), minimum=1e-6, maximum=1e-4, fallback=1e-5),
+        repeat_count=_clamp_int(payload.get("repeat_count"), minimum=4, maximum=64, fallback=16),
+        ready_to_train=ready_to_train,
+        create_new_class=create_new_class,
+        new_class_name=new_class_name,
+        preprocessing_method=preprocessing_method,
+        notes=str(payload.get("notes", "")).strip(),
+    )
+
+
+def build_detail_plan_prompt(
+    selected_records: list[dict[str, Any]],
+    chat_history: list[dict[str, str]],
+    user_message: str,
+    available_classes: list[str],
+    target_label_override: str | None = None,
+) -> str:
+    transcript = build_detail_transcript(chat_history)
+    if len(selected_records) == 1:
+        summary = (
+            "현재 선택된 이미지에 대해 재학습 계획을 세워 주세요.\n"
+            f"선택 이미지 파일명: {selected_records[0]['filename']}\n"
+            f"현재 예측 라벨: {selected_records[0]['label']}\n"
+            f"이미지 경로: {_to_project_relative_path(selected_records[0]['path'])}\n"
+        )
+    else:
+        summary_lines = [
+            "현재 선택된 이미지들에 대해 재학습 계획을 세워 주세요."
+        ]
+        for record in selected_records:
+            summary_lines.append(
+                f"- {record['filename']} (현재 예측: {record['label']}) 경로: {_to_project_relative_path(record['path'])}"
+            )
+        summary = "\n".join(summary_lines) + "\n"
+
+    if target_label_override:
+        summary += f"이번에는 목표 클래스는 '{target_label_override}'로 고정해 주세요.\n"
+
+    return summary + (
+        f"선택 가능 클래스: {', '.join(available_classes)}\n"
+        "새로운 클래스도 생성할 수 있습니다. 예를 들어, 이미지가 기존 분류에 맞지 않는다면 새 클래스를 제안해 주세요.\n"
+        "모델은 MobileViT 8-class 분류기이며, 사용자는 이 이미지를 특정 클래스로 다시 학습시키고 싶어 합니다.\n"
+        "대화 기록:\n"
+        f"{transcript}\n"
+        f"이번 사용자 메시지: {user_message.strip()}\n"
+        "클래스가 명확하면 target_label을 정하고, 보수적인 학습률/epoch/repeat_count를 제안해 주세요."
+    )
+
+
+def request_detail_finetune_plan(
+    selected_records: list[dict[str, Any]],
+    chat_history: list[dict[str, str]],
+    user_message: str,
+    model_dir: Path | str | None = None,
+    target_label_override: str | None = None,
+) -> DetailFineTunePlan:
+    dependency_ready, dependency_message = are_runtime_dependencies_available()
+    if not dependency_ready:
+        return DetailFineTunePlan(
+            assistant_reply=dependency_message,
+            target_label=None,
+            epochs=2.0,
+            learning_rate=1e-5,
+            repeat_count=16,
+            ready_to_train=False,
+            notes="runtime dependency missing",
+        )
+    if not is_model_downloaded():
+        return DetailFineTunePlan(
+            assistant_reply="로컬 Gemma 모델이 준비되지 않아 재학습 계획을 만들 수 없습니다.",
+            target_label=None,
+            epochs=2.0,
+            learning_rate=1e-5,
+            repeat_count=16,
+            ready_to_train=False,
+            notes="gemma model missing",
+        )
+
+    available_classes = load_available_classes(model_dir)
+    prompt = build_detail_plan_prompt(
+        selected_records,
+        chat_history,
+        user_message,
+        available_classes,
+        target_label_override=target_label_override,
+    )
+    target_label = target_label_override if target_label_override in available_classes else None
+    create_new_class = bool(target_label_override and target_label_override not in available_classes)
+    new_class_name = None
+    if create_new_class and target_label_override:
+        new_class_name = target_label_override.replace(" ", "_").replace("-", "_")
+
+    image_paths = [selected_records[0]["path"]] if len(selected_records) == 1 else []
+    used_image_context = bool(image_paths)
+
+    try:
+        try:
+            raw_response = generate_response(
+                prompt=prompt,
+                system_prompt=DETAIL_FINETUNE_SYSTEM_PROMPT,
+                image_paths=image_paths,
+                max_new_tokens=256,
+            )
+        except Exception as exc:
+            if not image_paths or not _is_out_of_memory_error(exc):
+                raise
+
+            unload_model()
+            used_image_context = False
+            raw_response = generate_response(
+                prompt=prompt,
+                system_prompt=DETAIL_FINETUNE_SYSTEM_PROMPT,
+                image_paths=[],
+                max_new_tokens=256,
+            )
+
+        plan = parse_detail_finetune_plan(raw_response, available_classes)
+        if not used_image_context:
+            if plan.notes:
+                plan.notes = f"{plan.notes} | GPU 메모리 절약을 위해 이미지 없이 계획 생성"
+            else:
+                plan.notes = "GPU 메모리 절약을 위해 이미지 없이 계획 생성"
+        return plan
+    except Exception as exc:
+        return DetailFineTunePlan(
+            assistant_reply=(
+                "재학습 계획 생성 중 오류가 발생했습니다. "
+                f"오류: {exc}"
+            ),
+            target_label=target_label,
+            epochs=2.0,
+            learning_rate=1e-5,
+            repeat_count=16,
+            ready_to_train=bool(target_label or new_class_name),
+            create_new_class=create_new_class,
+            new_class_name=new_class_name,
+            notes="gemma inference error",
+        )
+    finally:
+        unload_model()
+
+
+def run_detail_finetune_plan(
+    plan: DetailFineTunePlan,
+    selected_records: list[dict[str, Any]],
+    chat_history: list[dict[str, str]],
+    base_model_dir: Path | str | None = None,
+    manual_target_class_input: str | None = None,
+    selected_class_option: str | None = None,
+    log_callback: Callable[[str], None] | None = None,
+    use_record_labels: bool = False,
+    selection_metadata: dict[str, Any] | None = None,
+) -> DetailFineTuneExecutionResult:
+    resolved_base_model_dir = resolve_base_model_dir(base_model_dir)
+    INTERACTIVE_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-u",
+        _to_project_relative_path(INTERACTIVE_FINETUNE_SCRIPT),
+        "--base-model-dir",
+        _to_project_relative_path(resolved_base_model_dir),
+        "--config-path",
+        _to_project_relative_path(TRAINING_CONFIG_PATH),
+    ]
+    selected_records_manifest_path: str | None = None
+    if use_record_labels:
+        labeled_records_payload: list[dict[str, str]] = []
+        for record in selected_records:
+            assigned_label = str(record.get("assigned_label") or record.get("label") or "").strip()
+            if not assigned_label:
+                raise ValueError("선택 이미지 라벨이 비어 있습니다.")
+
+            payload_record = {
+                "path": _to_project_relative_path(record["path"]),
+                "label": assigned_label,
+            }
+            predicted_label = str(record.get("predicted_label") or "").strip()
+            if predicted_label:
+                payload_record["predicted_label"] = predicted_label
+            labeled_records_payload.append(payload_record)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            json.dump(labeled_records_payload, handle, ensure_ascii=False, indent=2)
+            selected_records_manifest_path = handle.name
+        command.extend(["--selected-records-path", selected_records_manifest_path])
+    elif len(selected_records) == 1:
+        command.extend(["--selected-image", _to_project_relative_path(selected_records[0]["path"])])
+    else:
+        command.append("--selected-images")
+        command.extend(_to_project_relative_path(record["path"]) for record in selected_records)
+
+    if not use_record_labels:
+        if plan.create_new_class and plan.new_class_name:
+            command.extend(["--create-new-class", "--new-class-name", plan.new_class_name])
+        else:
+            command.extend(["--target-label", str(plan.target_label)])
+
+    command.extend([
+        "--preprocessing-method",
+        plan.preprocessing_method,
+        "--predicted-label",
+        str(selected_records[0].get("predicted_label") or selected_records[0]["label"]),
+        "--epochs",
+        str(plan.epochs),
+        "--learning-rate",
+        str(plan.learning_rate),
+        "--repeat-count",
+        str(plan.repeat_count),
+        "--output-root",
+        _to_project_relative_path(INTERACTIVE_OUTPUT_ROOT),
+    ])
+    if manual_target_class_input:
+        command.extend(["--manual-target-class-input", manual_target_class_input])
+    if selected_class_option:
+        command.extend(["--selected-class-option", selected_class_option])
+    try:
+        if log_callback is None:
+            completed = subprocess.run(
+                command,
+                cwd=str(BASE_DIR),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        else:
+            process = subprocess.Popen(
+                command,
+                cwd=str(BASE_DIR),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
+            )
+            combined_stdout_lines: list[str] = []
+            assert process.stdout is not None
+            for line in process.stdout:
+                combined_stdout_lines.append(line)
+                log_callback("".join(combined_stdout_lines))
+            process.wait()
+            completed = subprocess.CompletedProcess(
+                args=command,
+                returncode=process.returncode,
+                stdout="".join(combined_stdout_lines),
+                stderr="",
+            )
+    finally:
+        if selected_records_manifest_path:
+            try:
+                Path(selected_records_manifest_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    output_dir = None
+    for line in completed.stdout.splitlines():
+        if line.startswith("OUTPUT_DIR="):
+            output_dir = line.split("=", 1)[1].strip()
+            break
+
+    llm_comment_path = None
+    selected_images_path = None
+    context_json_path = None
+    audit_log_json_path = None
+    audit_log_text_path = None
+    if output_dir:
+        output_path = _resolve_project_path(output_dir)
+        assert output_path is not None
+        if output_path.exists():
+            try:
+                llm_comment_path = _to_project_relative_path(
+                    save_detail_comment_file(
+                        output_dir=output_path,
+                        plan=plan,
+                        selected_records=selected_records,
+                        chat_history=chat_history,
+                        base_model_dir=resolved_base_model_dir,
+                        manual_target_class_input=manual_target_class_input,
+                        selected_class_option=selected_class_option,
+                    )
+                )
+                selected_images_path = _to_project_relative_path(save_selected_images_file(output_path, selected_records))
+                context_json_path = _to_project_relative_path(
+                    save_detail_context_json(
+                        output_dir=output_path,
+                        plan=plan,
+                        selected_records=selected_records,
+                        chat_history=chat_history,
+                        base_model_dir=resolved_base_model_dir,
+                        manual_target_class_input=manual_target_class_input,
+                        selected_class_option=selected_class_option,
+                    )
+                )
+                audit_json_path, audit_text_path = save_detail_audit_logs(
+                    output_dir=output_path,
+                    plan=plan,
+                    selected_records=selected_records,
+                    base_model_dir=resolved_base_model_dir,
+                    saved_model_dir=output_path,
+                    command=command,
+                    success=completed.returncode == 0,
+                    returncode=completed.returncode,
+                    manual_target_class_input=manual_target_class_input,
+                    selected_class_option=selected_class_option,
+                    selection_metadata=selection_metadata,
+                )
+                audit_log_json_path = _to_project_relative_path(audit_json_path)
+                audit_log_text_path = _to_project_relative_path(audit_text_path)
+            except Exception as artifact_exc:
+                completed.stderr = (
+                    completed.stderr
+                    + ("\n" if completed.stderr else "")
+                    + f"[artifact-save-error] {artifact_exc}"
+                )
+
+    return DetailFineTuneExecutionResult(
+        success=completed.returncode == 0,
+        command=command,
+        output_dir=_to_project_relative_path(output_dir) if output_dir else None,
+        llm_comment_path=llm_comment_path,
+        selected_images_path=selected_images_path,
+        context_json_path=context_json_path,
+        audit_log_json_path=audit_log_json_path,
+        audit_log_text_path=audit_log_text_path,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        returncode=completed.returncode,
+    )

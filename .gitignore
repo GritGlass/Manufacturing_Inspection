@@ -1,0 +1,16 @@
+
+.fontconfig-cache
+.matplotlib-cache
+.streamlit/*
+data/*
+log/*
+output/*
+test
+model/*
+
+
+#image
+*.jpg
+*.png
+*.webp
+*.jepg
