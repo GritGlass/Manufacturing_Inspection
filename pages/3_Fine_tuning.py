@@ -277,7 +277,7 @@ def _build_fine_tuning_plan_from_labels(
     label_counts = Counter(str(record.get("label") or "-") for record in selected_records)
     label_summary = ", ".join(f"{label}: {count}" for label, count in sorted(label_counts.items()))
     return DetailFineTunePlan(
-        assistant_reply=f"저장된 이미지 라벨로 바로 학습합니다. 라벨 분포: {label_summary}.",
+        assistant_reply=f"Training will start immediately using the saved image labels. Label distribution: {label_summary}.",
         target_label=None,
         epochs=float(epochs),
         learning_rate=float(learning_rate),
@@ -292,12 +292,12 @@ def _build_fine_tuning_plan_from_labels(
 
 def _get_supabase_client() -> Any:
     if SupabaseConnection is None:
-        raise RuntimeError("st_supabase_connection 패키지를 찾지 못했습니다.")
+        raise RuntimeError("The `st_supabase_connection` package could not be found.")
 
     connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
     client = getattr(connection, "client", None)
     if client is None:
-        raise RuntimeError("Supabase client를 사용할 수 없습니다.")
+        raise RuntimeError("The Supabase client is not available.")
     return client
 
 
@@ -453,7 +453,7 @@ def _render_fine_tuning_training_panel(
 
     if selected_records:
         label_counts = Counter(str(record.get("label") or "-") for record in selected_records)
-        panel.caption("Saved labels: " + ", ".join(f"{label} {count}장" for label, count in sorted(label_counts.items())))
+        panel.caption("Saved labels: " + ", ".join(f"{label}: {count}" for label, count in sorted(label_counts.items())))
 
     resolved_available_classes = [
         str(label).strip()
@@ -478,29 +478,29 @@ def _render_fine_tuning_training_panel(
     else:
         incremental_selected_records = list(selected_records)
         if selected_records:
-            panel.info("기존 클래스 목록을 확인하지 못해 선택된 전체 데이터를 학습 대상으로 사용합니다.")
+            panel.info("The existing class list could not be loaded, so all selected data will be used for training.")
 
     if not has_new_class and class_reference_available:
         excluded_count = len(selected_records) - len(incremental_selected_records)
         panel.caption(
-            "학습 모드: 기존 class 이어학습 (기존 weight 유지 + 추가 데이터만 학습)"
+            "Training mode: existing-class incremental training (keep current weights and train only with additional data)"
         )
         if excluded_count > 0:
             panel.info(
-                f"이미 학습 반영된 trained=True 이미지 {excluded_count}장은 제외하고 추가 데이터만 학습합니다."
+                f"{excluded_count} images already marked as `trained=True` will be excluded, and only additional data will be used."
             )
     elif has_new_class:
-        panel.caption("학습 모드: 신규 class 포함 (선택한 전체 데이터 학습)")
+        panel.caption("Training mode: includes new classes (train on all selected data)")
 
     if incremental_selected_records and len(incremental_selected_records) < 100:
         panel.warning(
-            f"현재 fine-tuning 학습 데이터가 {len(incremental_selected_records)}장입니다. "
-            "100장 미만에서는 클래스 편향(bias)이 생길 수 있습니다."
+            f"The current fine-tuning set contains {len(incremental_selected_records)} images. "
+            "With fewer than 100 images, class bias may occur."
         )
 
     panel.divider()
     panel.write("Active Learning")
-    panel.caption("선택한 inference model을 기준으로 random, margin sampling, boundary sampling으로 이미지를 자동 선택합니다.")
+    panel.caption("Automatically selects images for training based on the chosen inference model using the available sampling strategy.")
     active_learning_notice = str(st.session_state.get(f"{state_prefix}_active_learning_notice", "")).strip()
     if active_learning_notice:
         panel.caption(active_learning_notice)
@@ -535,12 +535,12 @@ def _render_fine_tuning_training_panel(
                     selection_percentage=selection_percentage,
                 )
                 if not selected_paths:
-                    panel.warning("Margin sampling으로 선택할 이미지가 없습니다.")
+                    panel.warning("No images were selected by margin sampling.")
                 else:
                     min_margin = float(margin_frame["margin_score"].min()) if not margin_frame.empty else 0.0
                     selection_notice = (
-                        f"Margin Sampling으로 {len(selected_paths)}장을 선택했습니다. "
-                        f"최소 margin={min_margin:.4f}"
+                        f"Margin Sampling selected {len(selected_paths)} images. "
+                        f"Minimum margin={min_margin:.4f}"
                     )
                     _reset_fine_tuning_page_session(selected_paths)
                     st.session_state[f"{state_prefix}_active_learning_percentage"] = selection_percentage
@@ -559,7 +559,7 @@ def _render_fine_tuning_training_panel(
                 sample_count = min(sample_count, len(selectable_records))
                 sampled_paths = set(random.sample([record["path"] for record in selectable_records], sample_count))
                 selected_paths = [record["path"] for record in image_pool_records if record["path"] in sampled_paths]
-                selection_notice = f"Random sampling으로 {len(selected_paths)}장을 선택했습니다."
+                selection_notice = f"Random sampling selected {len(selected_paths)} images."
                 _reset_fine_tuning_page_session(selected_paths)
                 st.session_state[f"{state_prefix}_active_learning_percentage"] = selection_percentage
                 st.session_state[f"{state_prefix}_active_learning_notice"] = selection_notice
@@ -569,11 +569,11 @@ def _render_fine_tuning_training_panel(
                     origin="active_learning",
                     notice=selection_notice,
                     selection_percentage=selection_percentage,
-                    model_dir=base_model_dir,
-                )
+                        model_dir=base_model_dir,
+                    )
                 st.rerun()
         except Exception as exc:
-            panel.warning(f"{active_learning_strategy} 실행 중 오류가 발생했습니다: {exc}")
+            panel.warning(f"An error occurred while running {active_learning_strategy}: {exc}")
 
     panel.divider()
     panel.write("Manual settings")
@@ -627,9 +627,9 @@ def _render_fine_tuning_training_panel(
     )
 
     if has_unsaved_label_changes:
-        panel.info("왼쪽 `Selected images`의 라벨 변경사항을 저장한 뒤 fine-tuning을 시작하세요.")
+        panel.info("Save the label changes in `Selected images` on the left before starting fine-tuning.")
     if selected_records and not incremental_selected_records:
-        panel.warning("신규 class가 없는 상태에서는 trained=False인 추가 데이터가 있어야 fine-tuning을 진행할 수 있습니다.")
+        panel.warning("Without new classes, fine-tuning requires additional data with `trained=False`.")
 
     train_disabled = not incremental_selected_records or has_unsaved_label_changes
     if panel.button(
@@ -681,7 +681,7 @@ def _render_fine_tuning_training_panel(
                 for record in incremental_selected_records[:20]
             ),
         )
-        with st.spinner("저장된 이미지 라벨을 기준으로 MobileViT 모델을 파인튜닝하는 중입니다..."):
+        with st.spinner("Fine-tuning the MobileViT model using the saved image labels..."):
             execution_result = run_detail_finetune_plan(
                 effective_plan,
                 incremental_selected_records,
@@ -706,9 +706,9 @@ def _render_fine_tuning_training_panel(
                     log_type="done" if supabase_sync_summary["error_count"] == 0 else "Warning",
                     source="Supabase",
                     content=(
-                        "Fine-tuning 학습 이미지 상태를 semiconductor 테이블에 반영했습니다."
+                        "The training image status was updated in the semiconductor table."
                         if supabase_sync_summary["error_count"] == 0
-                        else "Fine-tuning 학습 이미지 상태를 semiconductor 테이블에 일부만 반영했습니다."
+                        else "The training image status was only partially updated in the semiconductor table."
                     ),
                     request=(
                         f"trained=True, class=assigned_label, updated={supabase_sync_summary['updated_count']}, "
@@ -737,7 +737,7 @@ def _render_fine_tuning_training_panel(
                 _append_app_log(
                     log_type="error",
                     source="Supabase",
-                    content="Fine-tuning 후 semiconductor 테이블 업데이트에 실패했습니다.",
+                    content="Failed to update the semiconductor table after fine-tuning.",
                     request="trained=True, class=assigned_label",
                     response=str(exc),
                 )
@@ -780,7 +780,7 @@ def _render_fine_tuning_training_panel(
     if execution_result:
         with panel.expander("Fine-tuning result", expanded=not execution_result["success"]):
             if execution_result["success"]:
-                panel.success("파인튜닝이 완료되었습니다.")
+                panel.success("Fine-tuning completed successfully.")
                 if execution_result.get("output_dir"):
                     panel.caption(f"Output directory: {_format_display_path(execution_result['output_dir'])}")
                 if execution_result.get("llm_comment_path"):
@@ -790,7 +790,7 @@ def _render_fine_tuning_training_panel(
                 if execution_result.get("context_json_path"):
                     panel.caption(f"Context json file: {_format_display_path(execution_result['context_json_path'])}")
             else:
-                panel.error(f"파인튜닝 실행에 실패했습니다. return code: {execution_result['returncode']}")
+                panel.error(f"Fine-tuning failed. Return code: {execution_result['returncode']}")
             if execution_result.get("audit_log_json_path"):
                 panel.caption(f"Audit json file: {_format_display_path(execution_result['audit_log_json_path'])}")
             if execution_result.get("audit_log_text_path"):
@@ -824,10 +824,10 @@ def _render_fine_tuning_training_panel(
 
 
 def render_fine_tuning_page(image_records) -> None:
-    render_page_header("Fine-tuning", "이미지 pool에서 학습할 샘플을 선택하고 Interactive Fine-tuning을 실행하세요.")
+    render_page_header("Fine-tuning", "Select training samples from the image pool, then run Interactive Fine-tuning.")
     image_pool_records = _build_unique_image_pool(image_records)
     if not image_pool_records:
-        st.info("Fine-tuning에 사용할 이미지 pool이 없습니다.")
+        st.info("There is no image pool available for fine-tuning.")
         return
 
     predicted_pool_records = image_pool_records
@@ -845,7 +845,7 @@ def render_fine_tuning_page(image_records) -> None:
                 selector_key="fine_tuning_inference_model_selector",
                 active_key="fine_tuning_inference_model_active",
                 section_title="Image Pool",
-                helper_text="모델을 선택하면 아래 이미지 pool 전체를 해당 모델로 다시 예측합니다.",
+                helper_text="Selecting a model reruns inference for the full image pool below with that model.",
                 label="Inference model",
             )
             if selected_model_dir is None:
@@ -878,13 +878,13 @@ def render_fine_tuning_page(image_records) -> None:
                 prediction_errors = []
 
             if prediction_errors:
-                st.warning("일부 이미지 재추론에 실패했습니다: " + "; ".join(prediction_errors[:3]))
+                st.warning("Some images could not be reprocessed for inference: " + "; ".join(prediction_errors[:3]))
 
             available_classes = []
             try:
                 available_classes = load_available_classes(selected_model_dir)
             except Exception as exc:
-                st.warning(f"클래스 정보를 불러오지 못했습니다: {exc}")
+                st.warning(f"Could not load class information: {exc}")
 
             records_by_index = {
                 index: record for index, record in enumerate(predicted_pool_records, start=1)
@@ -912,11 +912,11 @@ def render_fine_tuning_page(image_records) -> None:
                     "Raw Image": st.column_config.ImageColumn("Raw Image", width="medium"),
                     "Trained": st.column_config.CheckboxColumn(
                         "Trained",
-                        help="Supabase 기준으로 이미 학습에 반영된 데이터인지 표시합니다.",
+                        help="Shows whether the data has already been reflected in training based on Supabase.",
                         width="small",
                     ),
                     "Predicted Class": st.column_config.TextColumn("Predicted Class", width="medium"),
-                    "Select": st.column_config.CheckboxColumn("Select", help="선택된 이미지만 fine-tuning에 사용됩니다."),
+                    "Select": st.column_config.CheckboxColumn("Select", help="Only selected images are used for fine-tuning."),
                 },
                 key="fine_tuning_image_pool_editor",
             )
@@ -932,7 +932,7 @@ def render_fine_tuning_page(image_records) -> None:
                     selected_paths=selected_paths,
                     strategy="Manual Selection",
                     origin="manual",
-                    notice="사용자가 fine-tuning 이미지 pool에서 직접 선택했습니다.",
+                    notice="The user manually selected images from the fine-tuning image pool.",
                     selection_percentage=None,
                     model_dir=selected_model_dir,
                 )
@@ -943,7 +943,7 @@ def render_fine_tuning_page(image_records) -> None:
                 _apply_fine_tuning_label_overrides(raw_selected_records),
                 selected_model_dir,
             )
-            st.caption(f"전체 이미지 {len(predicted_pool_records)}장 중 {len(selected_records)}장을 선택했습니다.")
+            st.caption(f"Selected {len(selected_records)} out of {len(predicted_pool_records)} total images.")
             if selected_records:
                 with st.expander(f"Selected images ({len(selected_records)})", expanded=True):
                     selected_records_widget_token = str(abs(hash(tuple(record["path"] for record in selected_records))))
@@ -951,7 +951,7 @@ def render_fine_tuning_page(image_records) -> None:
                         st.caption(
                             "Available classes: "
                             + ", ".join(available_classes)
-                            + " | 새 class는 `Label` 칸에 직접 입력하세요."
+                            + " | Enter new classes directly in the `Label` column."
                         )
                     label_editor_rows = [
                         {
@@ -978,7 +978,7 @@ def render_fine_tuning_page(image_records) -> None:
                                 "Label",
                                 width="medium",
                                 required=True,
-                                help="기존 class 이름을 입력하거나 새 class를 직접 입력하세요.",
+                                help="Enter an existing class name or type a new class directly.",
                             ),
                         },
                         key=f"fine_tuning_selected_label_editor__{selected_records_widget_token}",
@@ -1000,11 +1000,11 @@ def render_fine_tuning_page(image_records) -> None:
                             selected_model_dir,
                         )
                         has_unsaved_label_changes = False
-                        st.success("선택 이미지 라벨을 저장했습니다.")
+                        st.success("The selected image labels have been saved.")
                     elif has_unsaved_label_changes:
-                        st.info("라벨 변경 후 `Save labels`를 누르면 오른쪽 fine-tuning에 반영됩니다.")
+                        st.info("After editing labels, click `Save labels` to apply them to the fine-tuning panel on the right.")
             else:
-                st.info("왼쪽 Image Pool에서 `Select` 체크박스로 fine-tuning에 사용할 이미지를 선택하세요.")
+                st.info("Use the `Select` checkbox in the Image Pool on the left to choose images for fine-tuning.")
 
     with right_col:
         with st.container(border=True):

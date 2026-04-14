@@ -23,39 +23,41 @@ CLASSIFICATION_MODEL_ROOT = PROJECT_ROOT / "model" / "classification"
 CLASSIFIER_MODEL_DIR = CLASSIFICATION_MODEL_ROOT / "mobilevit_small_9_classifier"
 INTERACTIVE_FINETUNE_SCRIPT = PROJECT_ROOT / "scripts" / "interactive_finetune.py"
 INTERACTIVE_OUTPUT_ROOT = PROJECT_ROOT / "model"
-DETAIL_FINETUNE_SYSTEM_PROMPT = """당신은 반도체 이미지 분류 모델 파인튜닝 코치입니다.
-반드시 한국어로만 답변하세요.
-당신의 역할은 사용자가 선택한 이미지들에 대해 어떤 클래스로 다시 학습할지 정리하고, 안전한 파인튜닝 계획을 제안하는 것입니다.
-새로운 클래스를 생성할 수도 있습니다.
-당신은 영상 전처리 방법도 제안할 수 있습니다 (none, light_augmentation, medium_augmentation, heavy_augmentation, histogram_equalization, denoise).
-반드시 JSON 객체 하나만 출력하세요.
-JSON 스키마:
+DETAIL_FINETUNE_SYSTEM_PROMPT = """You are a fine-tuning coach for a semiconductor image classification model.
+Respond only in English.
+Your job is to organize how the user wants to retrain the selected images and propose a safe fine-tuning plan.
+You may suggest creating a new class.
+You may also suggest an image preprocessing method from this list: none, light_augmentation, medium_augmentation, heavy_augmentation, histogram_equalization, denoise.
+Output exactly one JSON object and nothing else.
+JSON schema:
 {
-  "assistant_reply": "사용자에게 보여줄 한국어 답변",
-  "target_label": "Center|Donut|Edge-Loc|Edge-Ring|Local|Near-Full|Normal|Scratch 또는 null",
+  "assistant_reply": "English reply shown to the user",
+  "target_label": "Center|Donut|Edge-Loc|Edge-Ring|Local|Near-Full|Normal|Scratch or null",
   "create_new_class": false,
-  "new_class_name": "새로운 클래스 이름 또는 null",
+  "new_class_name": "new class name or null",
   "preprocessing_method": "none|light_augmentation|medium_augmentation|heavy_augmentation|histogram_equalization|denoise",
-  "epochs": 1.0에서 5.0 사이 숫자,
-  "learning_rate": 0.000001에서 0.0001 사이 숫자,
-  "repeat_count": 4에서 64 사이 정수,
-  "ready_to_train": true 또는 false,
-  "notes": "짧은 내부 메모"
+  "epochs": number between 1.0 and 5.0,
+  "learning_rate": number between 0.000001 and 0.0001,
+  "repeat_count": integer between 4 and 64,
+  "ready_to_train": true or false,
+  "notes": "short internal note"
 }
-규칙:
-- 사용자가 클래스나 목적을 아직 명확히 말하지 않았다면 ready_to_train=false로 두고 짧게 되물어야 합니다.
-- 기존 클래스로 충분하면 target_label을 선택하고 create_new_class=false로 두세요.
-- 존재하지 않는 새로운 클래스가 필요하면 create_new_class=true로 두고 new_class_name에 클래스 이름을 입력하세요.
-- 새로운 클래스를 생성할 때는 target_label을 null로 두세요.
-- new_class_name은 영문자, 숫자, 하이픈(_)만 사용하고 공백은 금지입니다.- 전처리 방법:
-  * none: 전처리 없음
-  * light_augmentation: 가벼운 증강 (±10도 회전, 수평 뒷집기)
-  * medium_augmentation: 중간 증강 (±20도 회전, 뒯집기, 밝기 ±10%)
-  * heavy_augmentation: 강한 증강 (±30도 회전, 뒯집기, 밝기/대비 ±20%)
-  * histogram_equalization: 히스토그램 균등화 (명도 불균형 개선)
-  * denoise: 잡음 제거 (노이즈가 있는 이미지)
-- 영상이 노이즈가 많으면 denoise를, 어두운 부분과 밝은 부분이 섞여있으면 histogram_equalization을 제안하세요.- epochs, learning_rate, repeat_count는 과도하지 않게 보수적으로 제안하세요.
-- JSON 바깥의 설명 문장은 절대 출력하지 마세요."""
+Rules:
+- If the user has not clearly specified the target class or goal yet, set ready_to_train=false and ask a short clarifying question.
+- If an existing class is sufficient, choose target_label and keep create_new_class=false.
+- If a new class is needed and does not already exist, set create_new_class=true and write the class name in new_class_name.
+- When creating a new class, set target_label to null.
+- new_class_name must use only letters, numbers, and underscores, with no spaces.
+- Preprocessing methods:
+  * none: no preprocessing
+  * light_augmentation: light augmentation (rotation within about ±10 degrees, horizontal flip)
+  * medium_augmentation: medium augmentation (rotation within about ±20 degrees, flips, brightness ±10%)
+  * heavy_augmentation: heavy augmentation (rotation within about ±30 degrees, flips, brightness/contrast ±20%)
+  * histogram_equalization: histogram equalization for uneven brightness
+  * denoise: denoise for noisy images
+- If the image appears noisy, prefer denoise. If the image has mixed dark and bright regions, prefer histogram_equalization.
+- Keep epochs, learning_rate, and repeat_count conservative.
+- Never output explanatory text outside the JSON object."""
 
 
 def _resolve_project_path(value: str | Path | None) -> Path | None:
@@ -177,7 +179,7 @@ def load_available_classes(model_dir: Path | str | None = None) -> list[str]:
 
 def build_detail_transcript(chat_history: list[dict[str, str]]) -> str:
     if not chat_history:
-        return "대화 기록 없음"
+        return "No conversation history"
     return "\n".join(f"{message['role']}: {message['content']}" for message in chat_history)
 
 
@@ -437,11 +439,11 @@ def parse_detail_finetune_plan(raw_text: str, available_classes: list[str]) -> D
 
     reply = str(payload.get("assistant_reply", "")).strip()
     if not reply:
-        reply = "재학습 계획을 다시 설명해 주세요."
+        reply = "Please explain the retraining plan again."
 
     ready_to_train = bool(payload.get("ready_to_train", False)) and (target_label is not None or new_class_name is not None)
-    if not ready_to_train and target_label is None and new_class_name is None and "클래스" not in reply:
-        reply = "이 이미지를 어떤 클래스로 다시 학습할지 알려주세요."
+    if not ready_to_train and target_label is None and new_class_name is None and "class" not in reply.lower():
+        reply = "Please tell me which class this image should be retrained as."
 
     return DetailFineTunePlan(
         assistant_reply=reply,
@@ -467,32 +469,32 @@ def build_detail_plan_prompt(
     transcript = build_detail_transcript(chat_history)
     if len(selected_records) == 1:
         summary = (
-            "현재 선택된 이미지에 대해 재학습 계획을 세워 주세요.\n"
-            f"선택 이미지 파일명: {selected_records[0]['filename']}\n"
-            f"현재 예측 라벨: {selected_records[0]['label']}\n"
-            f"이미지 경로: {_to_project_relative_path(selected_records[0]['path'])}\n"
+            "Please create a retraining plan for the currently selected image.\n"
+            f"Selected image filename: {selected_records[0]['filename']}\n"
+            f"Current predicted label: {selected_records[0]['label']}\n"
+            f"Image path: {_to_project_relative_path(selected_records[0]['path'])}\n"
         )
     else:
         summary_lines = [
-            "현재 선택된 이미지들에 대해 재학습 계획을 세워 주세요."
+            "Please create a retraining plan for the currently selected images."
         ]
         for record in selected_records:
             summary_lines.append(
-                f"- {record['filename']} (현재 예측: {record['label']}) 경로: {_to_project_relative_path(record['path'])}"
+                f"- {record['filename']} (current prediction: {record['label']}) path: {_to_project_relative_path(record['path'])}"
             )
         summary = "\n".join(summary_lines) + "\n"
 
     if target_label_override:
-        summary += f"이번에는 목표 클래스는 '{target_label_override}'로 고정해 주세요.\n"
+        summary += f"For this plan, keep the target class fixed as '{target_label_override}'.\n"
 
     return summary + (
-        f"선택 가능 클래스: {', '.join(available_classes)}\n"
-        "새로운 클래스도 생성할 수 있습니다. 예를 들어, 이미지가 기존 분류에 맞지 않는다면 새 클래스를 제안해 주세요.\n"
-        "모델은 MobileViT 8-class 분류기이며, 사용자는 이 이미지를 특정 클래스로 다시 학습시키고 싶어 합니다.\n"
-        "대화 기록:\n"
+        f"Available classes: {', '.join(available_classes)}\n"
+        "You may also propose a new class if the image does not fit the existing classes.\n"
+        "The model is a MobileViT 8-class classifier, and the user wants to retrain this image or these images toward the correct class.\n"
+        "Conversation history:\n"
         f"{transcript}\n"
-        f"이번 사용자 메시지: {user_message.strip()}\n"
-        "클래스가 명확하면 target_label을 정하고, 보수적인 학습률/epoch/repeat_count를 제안해 주세요."
+        f"Current user message: {user_message.strip()}\n"
+        "If the class is clear, set target_label and propose conservative values for learning_rate, epochs, and repeat_count."
     )
 
 
@@ -516,7 +518,7 @@ def request_detail_finetune_plan(
         )
     if not is_model_downloaded():
         return DetailFineTunePlan(
-            assistant_reply="로컬 Gemma 모델이 준비되지 않아 재학습 계획을 만들 수 없습니다.",
+            assistant_reply="The local Gemma model is not ready, so a retraining plan could not be created.",
             target_label=None,
             epochs=2.0,
             learning_rate=1e-5,
@@ -566,15 +568,15 @@ def request_detail_finetune_plan(
         plan = parse_detail_finetune_plan(raw_response, available_classes)
         if not used_image_context:
             if plan.notes:
-                plan.notes = f"{plan.notes} | GPU 메모리 절약을 위해 이미지 없이 계획 생성"
+                plan.notes = f"{plan.notes} | plan generated without images to reduce GPU memory use"
             else:
-                plan.notes = "GPU 메모리 절약을 위해 이미지 없이 계획 생성"
+                plan.notes = "plan generated without images to reduce GPU memory use"
         return plan
     except Exception as exc:
         return DetailFineTunePlan(
             assistant_reply=(
-                "재학습 계획 생성 중 오류가 발생했습니다. "
-                f"오류: {exc}"
+                "An error occurred while generating the retraining plan. "
+                f"Error: {exc}"
             ),
             target_label=target_label,
             epochs=2.0,
@@ -616,7 +618,7 @@ def run_detail_finetune_plan(
         for record in selected_records:
             assigned_label = str(record.get("assigned_label") or record.get("label") or "").strip()
             if not assigned_label:
-                raise ValueError("선택 이미지 라벨이 비어 있습니다.")
+                raise ValueError("A selected image label is empty.")
 
             payload_record = {
                 "path": _to_project_relative_path(record["path"]),

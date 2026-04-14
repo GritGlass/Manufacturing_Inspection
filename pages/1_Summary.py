@@ -25,7 +25,6 @@ from scripts.local_gemma_model import (
 from scripts.utils import (
     CLASS_VISUALIZATION_ORDER,
     PDF_FONT_CANDIDATES,
-    SUMMARY_ANALYSIS_SYSTEM_PROMPT,
     _get_discrete_class_colors,
     _get_llm_runtime_settings,
     build_aggregate_run,
@@ -35,6 +34,14 @@ from scripts.utils import (
     render_class_distribution_chart,
     render_page_header,
 )
+
+
+SUMMARY_ANALYSIS_SYSTEM_PROMPT = """You are a quality analyst summarizing semiconductor inspection results.
+
+Respond only in English.
+Use the provided metrics, trends, and image information to write a clear 4 to 6 sentence analysis comment.
+Focus on overall quality status, notable defect patterns, and meaningful changes in the data.
+"""
 
 
 def build_overview_frame(latest_run: dict[str, Any] | None) -> pd.DataFrame:
@@ -195,30 +202,30 @@ def build_summary_analysis_prompt(
     sample_records: list[dict[str, Any]],
 ) -> str:
     if not latest_run:
-        return "현재 검사 데이터가 없습니다. 데이터 부재 상황에 대한 짧은 한국어 코멘트를 작성해 주세요."
+        return "There is no current inspection data. Please write a short English comment explaining that no data is available."
 
     class_distribution = ", ".join(
-        f"{label} {count}개" for label, count in latest_run["label_counts"].items()
-    ) or "분류 데이터 없음"
+        f"{label}: {count}" for label, count in latest_run["label_counts"].items()
+    ) or "No classification data"
     sample_descriptions = "\n".join(
-        f"- {record['filename']} | 예측 클래스: {record['label']}"
+        f"- {record['filename']} | Predicted class: {record['label']}"
         for record in sample_records
-    ) or "- 첨부 이미지 없음"
+    ) or "- No attached images"
 
     return (
-        "다음은 반도체 검사 Summary 데이터입니다.\n"
-        f"최신 배치 시각: {latest_run['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"총 제품 수: {latest_run['total_count']}\n"
-        f"양품 수: {latest_run['good_count']}\n"
-        f"불량 수: {latest_run['bad_count']}\n"
-        f"평균 추론 시간(ms): {latest_run['average_inference_ms']:.2f}\n"
-        f"클래스 분포: {class_distribution}\n"
-        f"월별 데이터: {format_trend_for_prompt(trends['Monthly profit graph'])}\n"
-        f"주별 데이터: {format_trend_for_prompt(trends['Weekly profit graph'])}\n"
-        f"일별 데이터: {format_trend_for_prompt(trends['Daily profit graph'])}\n"
-        "첨부 이미지 정보:\n"
+        "Below is semiconductor inspection summary data.\n"
+        f"Latest batch timestamp: {latest_run['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Total products: {latest_run['total_count']}\n"
+        f"OK products: {latest_run['good_count']}\n"
+        f"NG products: {latest_run['bad_count']}\n"
+        f"Average inference time (ms): {latest_run['average_inference_ms']:.2f}\n"
+        f"Class distribution: {class_distribution}\n"
+        f"Monthly data: {format_trend_for_prompt(trends['Monthly profit graph'])}\n"
+        f"Weekly data: {format_trend_for_prompt(trends['Weekly profit graph'])}\n"
+        f"Daily data: {format_trend_for_prompt(trends['Daily profit graph'])}\n"
+        "Attached image information:\n"
         f"{sample_descriptions}\n"
-        "위 수치와 첨부된 추론 결과 이미지를 함께 보고, 품질 상태와 주요 결함 양상을 요약한 분석 코멘트를 작성해 주세요."
+        "Review these metrics together with the attached inference result images, and write an English analysis comment that summarizes the quality status and major defect patterns."
     )
 
 
@@ -248,15 +255,15 @@ def build_summary_analysis_comment(
 ) -> tuple[str, list[dict[str, Any]]]:
     sample_records = select_summary_image_records(image_records, latest_run)
     if latest_run is None:
-        return "검사 데이터가 없어 분석 코멘트를 생성할 수 없습니다.", sample_records
+        return "No inspection data is available, so an analysis comment could not be generated.", sample_records
 
-    dependency_ready, dependency_message = are_runtime_dependencies_available()
+    dependency_ready, _dependency_message = are_runtime_dependencies_available()
     if not dependency_ready:
-        return dependency_message, sample_records
+        return "The required packages for the local Gemma runtime are not installed.", sample_records
 
     llm_settings = _get_llm_runtime_settings()
     if not is_model_downloaded(llm_settings["model_dir"]):
-        return "로컬 Gemma 모델이 준비되지 않아 분석 코멘트를 생성하지 못했습니다.", sample_records
+        return "The local Gemma model is not ready, so the analysis comment could not be generated.", sample_records
 
     prompt = build_summary_analysis_prompt(latest_run, trends, sample_records)
     image_paths = tuple(record["path"] for record in sample_records if record["exists"])
@@ -270,9 +277,9 @@ def build_summary_analysis_comment(
             min(int(llm_settings["max_new_tokens"]), 768),
             float(llm_settings["temperature"]),
         ).strip()
-        return comment or "LLM 응답이 비어 있어 분석 코멘트를 생성하지 못했습니다.", sample_records
+        return comment or "The LLM returned an empty response, so the analysis comment could not be generated.", sample_records
     except Exception as exc:
-        return f"LLM 분석 코멘트 생성 중 오류가 발생했습니다: {exc}", sample_records
+        return f"An error occurred while generating the LLM analysis comment: {exc}", sample_records
 
 
 def _wrap_text_lines(text: str, width: int = 42) -> str:
@@ -379,20 +386,20 @@ def build_summary_pdf_bytes(
                 "high",
                 "critical",
                 "unstable",
-                "불량",
-                "위험",
-                "심각",
-                "문제",
+                "issue",
+                "risk",
+                "severe",
+                "warning",
             )
             positive_keywords = (
                 "excellent",
                 "good",
                 "stable",
                 "improved",
-                "양호",
-                "안정",
-                "정상",
-                "개선",
+                "normal",
+                "healthy",
+                "consistent",
+                "positive",
             )
 
             negative_hits = sum(1 for keyword in negative_keywords if keyword in normalized)
@@ -687,7 +694,7 @@ def render_summary_page(runs, image_records) -> None:
     report_sample_records = select_summary_report_image_records(image_records)
     report_pdf_error = ""
 
-    with st.spinner("Summary 리포트와 AI 코멘트를 준비하는 중입니다..."):
+    with st.spinner("Preparing the Summary report and AI comment..."):
         analysis_comment, _sample_records = build_summary_analysis_comment(summary_run, image_records, trends)
 
         if summary_run:
@@ -737,7 +744,7 @@ def render_summary_page(runs, image_records) -> None:
                 )
             except Exception as exc:
                 report_pdf = b""
-                report_pdf_error = f"PDF 리포트 생성 중 오류가 발생했습니다: {exc}"
+                report_pdf_error = f"An error occurred while generating the PDF report: {exc}"
         else:
             report_pdf = b""
 
@@ -815,16 +822,16 @@ def render_summary_page(runs, image_records) -> None:
                 st.line_chart(frame, width="stretch")
 
     with st.container(border=True):
-        st.subheader("anlysis")
+        st.subheader("Analysis")
         if summary_run:
-            if analysis_comment.startswith("LLM 분석 코멘트 생성 중 오류") or analysis_comment.startswith("로컬 Gemma 모델이"):
+            if analysis_comment.startswith("An error occurred while generating the LLM analysis comment") or analysis_comment.startswith("The local Gemma model is not ready"):
                 st.warning(analysis_comment)
-            elif analysis_comment.startswith("로컬 Gemma 실행에 필요한 패키지"):
+            elif analysis_comment.startswith("The required packages for the local Gemma runtime are not installed"):
                 st.warning(analysis_comment)
             else:
                 st.write(_sanitize_analysis_comment(analysis_comment))
         else:
-            st.info("분석할 Summary 데이터가 없습니다.")
+            st.info("No Summary data is available to analyze.")
 
 
 configure_page("Summary")

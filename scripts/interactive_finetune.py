@@ -96,20 +96,20 @@ def load_records_csv(path: Path) -> list[dict[str, str]]:
 def load_selected_records_manifest(path: Path) -> list[dict[str, Any]]:
     payload = load_json(path)
     if not isinstance(payload, list):
-        raise ValueError("selected records manifest 형식이 올바르지 않습니다.")
+        raise ValueError("The selected records manifest format is invalid.")
 
     selected_records: list[dict[str, Any]] = []
     for item in payload:
         if not isinstance(item, dict):
-            raise ValueError("selected records manifest 항목 형식이 올바르지 않습니다.")
+            raise ValueError("A selected records manifest entry has an invalid format.")
 
         resolved_image_path = resolve_project_path(item.get("path"))
         label = str(item.get("label") or "").strip()
         predicted_label = str(item.get("predicted_label") or "").strip() or None
         if resolved_image_path is None:
-            raise ValueError("selected records manifest에서 이미지 경로를 해석할 수 없습니다.")
+            raise ValueError("Could not resolve an image path from the selected records manifest.")
         if not label:
-            raise ValueError("selected records manifest에 비어 있는 라벨이 있습니다.")
+            raise ValueError("The selected records manifest contains an empty label.")
 
         selected_records.append(
             {
@@ -152,7 +152,7 @@ def ensure_selected_labels_in_mappings(
     for selected_record in selected_records:
         selected_label = str(selected_record.get("label") or "").strip()
         if not selected_label:
-            raise ValueError("선택 이미지 라벨이 비어 있습니다.")
+            raise ValueError("A selected image label is empty.")
 
         selected_record["label"] = selected_label
         if selected_label in label2id:
@@ -186,7 +186,7 @@ def main() -> None:
     args.output_root = resolve_project_path(args.output_root)
     args.selected_records_path = resolve_project_path(args.selected_records_path)
     if args.base_model_dir is None or args.output_root is None:
-        raise ValueError("base-model-dir 또는 output-root 경로를 해석할 수 없습니다.")
+        raise ValueError("Could not resolve the `base-model-dir` or `output-root` path.")
     if not args.base_model_dir.exists():
         raise FileNotFoundError(f"Base model directory does not exist: {args.base_model_dir}")
     label2id, id2label = build_label_mappings(args.base_model_dir)
@@ -195,18 +195,18 @@ def main() -> None:
     target_label = None
     if args.create_new_class:
         if not args.new_class_name:
-            raise ValueError("--create-new-class 옵션을 사용할 때는 --new-class-name을 반드시 지정해야 합니다.")
+            raise ValueError("`--new-class-name` must be provided when using `--create-new-class`.")
         new_class_name = args.new_class_name.replace(" ", "_").replace("-", "_")
         if new_class_name in label2id:
-            raise ValueError(f"클래스 '{new_class_name}'은(는) 이미 존재합니다.")
+            raise ValueError(f"The class '{new_class_name}' already exists.")
         next_id = max(int(id) for id in label2id.values()) + 1
         label2id[new_class_name] = next_id
         id2label[next_id] = new_class_name
         target_label = new_class_name
-        print(f"새로운 클래스 생성: {new_class_name} (ID: {next_id})")
+        print(f"New class created: {new_class_name} (ID: {next_id})")
     else:
         if not args.selected_records_path and not args.target_label:
-            raise ValueError("--target-label을 반드시 지정해야 합니다.")
+            raise ValueError("`--target-label` must be provided.")
         target_label = args.target_label
         if target_label and target_label not in label2id:
             raise ValueError(
@@ -227,10 +227,10 @@ def main() -> None:
             selected_images = [resolved_selected_image]
         else:
             raise ValueError(
-                "--selected-records-path, --selected-image 또는 --selected-images 중 하나를 반드시 지정해야 합니다."
+                "One of `--selected-records-path`, `--selected-image`, or `--selected-images` must be provided."
             )
         if any(path is None for path in selected_images):
-            raise ValueError("선택 이미지 경로를 해석할 수 없습니다.")
+            raise ValueError("Could not resolve a selected image path.")
         selected_records = [
             {
                 "path": path,
@@ -242,7 +242,7 @@ def main() -> None:
         ]
 
     if not selected_records:
-        raise ValueError("학습에 사용할 선택 이미지가 없습니다.")
+        raise ValueError("There are no selected images available for training.")
 
     selected_images = [Path(record["path"]) for record in selected_records]
     for selected_image in selected_images:
@@ -251,7 +251,7 @@ def main() -> None:
 
     added_selected_labels = ensure_selected_labels_in_mappings(selected_records, label2id, id2label)
     for added_label in added_selected_labels:
-        print(f"새로운 클래스 생성: {added_label} (selected record label)")
+        print(f"New class created: {added_label} (selected record label)")
 
     config = build_interactive_config(args.base_model_dir, args)
     set_seed(int(config.get("seed", 42)))
@@ -296,7 +296,7 @@ def main() -> None:
     print(f"TRAIN_BATCH_SIZE={train_batch_size}")
     print(f"STEPS_PER_EPOCH={steps_per_epoch}")
     if device_name == "cpu":
-        print("WARNING: CUDA를 사용할 수 없어 CPU로 학습합니다. 시간이 오래 걸릴 수 있습니다.")
+        print("WARNING: CUDA is not available, so training will run on CPU. This may take a while.")
 
     training_args = build_training_arguments(config, output_dir)
     trainer = build_trainer(

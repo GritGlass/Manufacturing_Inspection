@@ -671,7 +671,7 @@ def main() -> None:
     args.config_path = resolve_project_path(args.config_path)
     args.output_dir = resolve_project_path(args.output_dir)
     if args.config_path is None or args.output_dir is None:
-        raise ValueError("config_path 또는 output_dir 경로를 해석할 수 없습니다.")
+        raise ValueError("Could not resolve `config_path` or `output_dir`.")
     args.output_dir = ensure_output_dir(args.output_dir)
 
     config = load_config(args.config_path)

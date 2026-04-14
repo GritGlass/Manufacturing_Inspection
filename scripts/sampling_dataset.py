@@ -220,7 +220,7 @@ def main() -> None:
     args.train_dir = resolve_project_path(args.train_dir)
     args.output_csv = resolve_project_path(args.output_csv)
     if args.train_dir is None or args.output_csv is None:
-        raise ValueError("train-dir 또는 output-csv 경로를 해석할 수 없습니다.")
+        raise ValueError("Could not resolve `train-dir` or `output-csv`.")
     train_dir = args.train_dir
 
     if not train_dir.exists():

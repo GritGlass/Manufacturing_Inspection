@@ -259,7 +259,7 @@ def main() -> None:
     args.data_path = resolve_project_path(args.data_path)
     args.output_path = resolve_project_path(args.output_path)
     if args.model_path is None or args.data_path is None or args.output_path is None:
-        raise ValueError("model-path, data-path, output-path 경로를 해석할 수 없습니다.")
+        raise ValueError("Could not resolve the `model-path`, `data-path`, or `output-path`.")
     total_start_ns = time.perf_counter_ns()
 
     model_dir = resolve_model_dir(args.model_path)

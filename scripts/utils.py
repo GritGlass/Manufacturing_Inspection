@@ -62,16 +62,16 @@ SEVERITY_ORDER = {
     "System start": 6,
     "Model update": 7,
 }
-DEFAULT_GEMMA_SYSTEM_PROMPT = """당신은 한국어 중심의 제조 대시보드 보조 AI입니다.
-답변은 짧고 명확하게 작성하세요.
-사용자가 공정, 품질, 알람, 설정 관련 질문을 하면 실행 가능한 다음 행동을 함께 제안하세요.
-프롬프트에 현재 대시보드 상태나 Streamlit 실행 컨텍스트가 함께 제공되면 그 정보를 우선 근거로 사용하세요.
-컨텍스트에 없는 내용은 추측하지 말고 없다고 명시하세요."""
-SUMMARY_ANALYSIS_SYSTEM_PROMPT = """당신은 반도체 검사 결과를 요약하는 품질 분석가입니다.
-반드시 한국어로만 답변하세요.
-입력된 수치, 추세, 이미지 정보를 근거로 4~6문장 분석 코멘트를 작성하세요.
-전체 품질 상태, 주요 결함, 추세 해석, 즉시 권장 조치를 모두 포함하세요.
-추정은 최소화하고 데이터에 근거해 간결하게 정리하세요."""
+DEFAULT_GEMMA_SYSTEM_PROMPT = """You are a manufacturing dashboard assistant.
+Keep responses short, clear, and practical.
+When the user asks about process, quality, alarms, or settings, suggest actionable next steps when helpful.
+If the prompt includes the current dashboard state or Streamlit runtime context, prioritize that information.
+Do not guess about anything not present in the provided context. State clearly when information is unavailable."""
+SUMMARY_ANALYSIS_SYSTEM_PROMPT = """You are a quality analyst summarizing semiconductor inspection results.
+Respond only in English.
+Write a concise 4 to 6 sentence analysis comment based on the provided metrics, trends, and image information.
+Include the overall quality status, notable defects, trend interpretation, and immediate recommended actions.
+Minimize speculation and stay grounded in the data."""
 PDF_FONT_CANDIDATES = (
     Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc"),
@@ -98,12 +98,12 @@ CLASS_VISUALIZATION_COLORS = {
     "Scratch": "#FFD60A",
 }
 DETAIL_PREPROCESSING_LABELS = {
-    "none": "전처리 없음",
-    "light_augmentation": "가벼운 증강",
-    "medium_augmentation": "중간 증강",
-    "heavy_augmentation": "강한 증강",
-    "histogram_equalization": "히스토그램 균등화",
-    "denoise": "잡음 제거",
+    "none": "No preprocessing",
+    "light_augmentation": "Light augmentation",
+    "medium_augmentation": "Medium augmentation",
+    "heavy_augmentation": "Heavy augmentation",
+    "histogram_equalization": "Histogram equalization",
+    "denoise": "Denoise",
 }
 REQUIRED_CLASSIFIER_MODEL_FILES = (
     "model.safetensors",
@@ -393,7 +393,7 @@ def _fetch_csv_fallback_rows(
     query_date_end: str | None = None,
 ) -> list[dict[str, Any]]:
     if not CSV_FALLBACK_DATA_PATH.exists():
-        raise RuntimeError(f"CSV fallback 파일이 없습니다: {CSV_FALLBACK_DATA_PATH}")
+        raise RuntimeError(f"The CSV fallback file does not exist: {CSV_FALLBACK_DATA_PATH}")
 
     date_start = None
     date_end = None
@@ -436,7 +436,7 @@ def _fetch_csv_fallback_rows(
 
 def _fetch_supabase_semiconductor_rows(query_date_start: str | None = None, query_date_end: str | None = None) -> list[dict[str, Any]]:
     if SupabaseConnection is None:
-        raise RuntimeError("st_supabase_connection 패키지를 찾지 못했습니다.")
+        raise RuntimeError("The `st_supabase_connection` package could not be found.")
 
     connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
     last_error: Exception | None = None
@@ -548,8 +548,8 @@ def _load_supabase_image_candidates(
                 log_type="Warning",
                 source="Supabase",
                 content=(
-                    f"semiconductor 테이블에서 읽은 이미지 중 {skipped_missing_paths}건은 "
-                    "로컬 절대경로 파일이 없어 제외했습니다."
+                    f"{skipped_missing_paths} image entries loaded from the semiconductor table were skipped "
+                    "because the local absolute-path files were not found."
                 ),
                 timestamp=reference_time,
             )
@@ -560,8 +560,8 @@ def _load_supabase_image_candidates(
                 log_type="Warning",
                 source="Supabase",
                 content=(
-                    f"semiconductor 테이블에서 읽은 이미지 중 {skipped_invalid_paths}건은 "
-                    "image_path 형식이 올바르지 않아 제외했습니다."
+                    f"{skipped_invalid_paths} image entries loaded from the semiconductor table were skipped "
+                    "because the `image_path` format was invalid."
                 ),
                 timestamp=reference_time,
             )
@@ -619,8 +619,8 @@ def _load_csv_image_candidates(
                 log_type="Warning",
                 source="CSV",
                 content=(
-                    f"CSV fallback에서 읽은 이미지 중 {skipped_missing_paths}건은 "
-                    "로컬 파일이 없어 제외했습니다."
+                    f"{skipped_missing_paths} image entries loaded from the CSV fallback were skipped "
+                    "because the local files were not found."
                 ),
                 timestamp=reference_time,
             )
@@ -631,8 +631,8 @@ def _load_csv_image_candidates(
                 log_type="Warning",
                 source="CSV",
                 content=(
-                    f"CSV fallback에서 읽은 이미지 중 {skipped_invalid_paths}건은 "
-                    "image_path 형식이 올바르지 않아 제외했습니다."
+                    f"{skipped_invalid_paths} image entries loaded from the CSV fallback were skipped "
+                    "because the `image_path` format was invalid."
                 ),
                 timestamp=reference_time,
             )
@@ -782,7 +782,7 @@ def _render_classifier_model_selector(
         container.caption(helper_text)
 
     if not available_model_dirs:
-        container.warning(f"분류 모델 폴더를 찾을 수 없습니다: {_to_project_relative_path(CLASSIFICATION_MODEL_ROOT)}")
+        container.warning(f"Classifier model folder not found: {_to_project_relative_path(CLASSIFICATION_MODEL_ROOT)}")
         return None, False
 
     default_model_dir = _get_default_detail_inference_model_dir(selected_records)
@@ -849,7 +849,7 @@ def _load_dashboard_classifier_runtime(model_dir_value: str) -> tuple[Any, Any, 
         _suppress_transformers_path_alias_warning()
         from transformers import AutoImageProcessor, AutoModelForImageClassification
     except ImportError as exc:
-        raise RuntimeError("대시보드 기본 추론에 필요한 torch/transformers 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch/transformers packages required for dashboard inference are not installed.") from exc
 
     resolved_model_dir = resolve_base_model_dir(model_dir_value)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -871,7 +871,7 @@ def _predict_dashboard_labels(
         import torch
         from PIL import Image
     except ImportError as exc:
-        raise RuntimeError("대시보드 기본 추론에 필요한 torch/Pillow 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch/Pillow packages required for dashboard inference are not installed.") from exc
 
     image_processor, model, device_name = _load_dashboard_classifier_runtime(model_dir_value)
     device = torch.device(device_name)
@@ -955,7 +955,7 @@ def load_dashboard_data(
                     log_type="Warning",
                     source="Supabase",
                     content=(
-                        "Supabase semiconductor 연동에 실패하여 data/data.csv fallback으로 전환했습니다. "
+                        "Supabase semiconductor integration failed, so the app switched to the `data/data.csv` fallback. "
                         f"error={exc}"
                     ),
                     timestamp=now,
@@ -970,7 +970,7 @@ def load_dashboard_data(
                     log_type="Warning",
                     source="Supabase",
                     content=(
-                        "Supabase semiconductor 연동 실패 후 CSV fallback도 실패했습니다. "
+                        "Supabase semiconductor integration failed, and the CSV fallback also failed. "
                         f"supabase_error={exc} | csv_error={csv_exc}"
                     ),
                     timestamp=now,
@@ -1002,7 +1002,7 @@ def load_dashboard_data(
                 log_type="Warning",
                 source="Inference",
                 content=(
-                    "기본 분류 모델 추론에 실패해 저장된 라벨 값으로 대체했습니다. "
+                    "Default classifier inference failed, so the stored label values were used instead. "
                     f"model={_to_project_relative_path(default_model_dir)} | error={exc}"
                 ),
                 timestamp=now,
@@ -1295,7 +1295,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
             "Command",
             key="gemma_sidebar_prompt",
             height=140,
-            placeholder="Gemma 4 E2B에 전달할 명령이나 질문을 입력하세요.",
+            placeholder="Enter the command or question to send to Gemma 4 E2B.",
         )
         send_clicked = st.button("Send", key="gemma_sidebar_send", type="primary", width="stretch")
 
@@ -1303,7 +1303,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
             prompt_text = prompt.strip()
             if not prompt_text:
                 st.session_state["gemma_sidebar_status"] = "error"
-                st.session_state["gemma_sidebar_notice"] = "질문이나 명령을 먼저 입력해 주세요."
+                st.session_state["gemma_sidebar_notice"] = "Please enter a question or command first."
                 st.session_state["gemma_sidebar_response"] = ""
                 _append_app_log(
                     log_type="error",
@@ -1325,7 +1325,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                 )
             elif not model_ready:
                 st.session_state["gemma_sidebar_status"] = "error"
-                st.session_state["gemma_sidebar_notice"] = "로컬 모델이 아직 없습니다. 지정된 model 폴더에 모델을 먼저 준비해 주세요."
+                st.session_state["gemma_sidebar_notice"] = "The local model is not ready yet. Please place the model in the configured `model` folder first."
                 st.session_state["gemma_sidebar_response"] = ""
                 _append_app_log(
                     log_type="error",
@@ -1336,7 +1336,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                 )
             else:
                 st.session_state["gemma_sidebar_status"] = "running"
-                st.session_state["gemma_sidebar_notice"] = f"{selected_model_name}가 응답을 생성하는 중입니다."
+                st.session_state["gemma_sidebar_notice"] = f"{selected_model_name} is generating a response."
                 st.session_state["gemma_sidebar_response"] = ""
                 _append_app_log(
                     log_type="start",
@@ -1346,15 +1346,16 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                 )
 
                 try:
-                    with st.spinner("LLM 동작 중..."):
+                    with st.spinner("Running the LLM..."):
                         runtime_context = _build_sidebar_runtime_context(current_page_title)
                         augmented_prompt = (
                             "[Current Streamlit Runtime Context]\n"
                             f"{runtime_context}\n\n"
                             "[User Request]\n"
                             f"{prompt_text}\n\n"
-                            "위 현재 Streamlit 대시보드 데이터와 세션 상태를 우선 참고해서 한국어로 답하세요. "
-                            "데이터에 없는 내용은 추측하지 말고 없다고 말하세요."
+                            "Use the current Streamlit dashboard data and session state above as your primary context. "
+                            "Respond only in English. "
+                            "Do not guess about anything missing from the data; state clearly when information is unavailable."
                         )
                         answer = generate_response(
                             prompt=augmented_prompt,
@@ -1364,7 +1365,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                             model_dir=selected_model_dir,
                         )
                     st.session_state["gemma_sidebar_status"] = "completed"
-                    st.session_state["gemma_sidebar_notice"] = "응답 생성이 완료되었습니다."
+                    st.session_state["gemma_sidebar_notice"] = "The response has been generated."
                     st.session_state["gemma_sidebar_response"] = answer
                     _append_app_log(
                         log_type="done",
@@ -1375,7 +1376,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                     )
                 except Exception as exc:
                     st.session_state["gemma_sidebar_status"] = "error"
-                    st.session_state["gemma_sidebar_notice"] = "LLM 호출 중 오류가 발생했습니다."
+                    st.session_state["gemma_sidebar_notice"] = "An error occurred while calling the LLM."
                     st.session_state["gemma_sidebar_response"] = str(exc)
                     _append_app_log(
                         log_type="error",
@@ -1401,7 +1402,7 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
             value=st.session_state["gemma_sidebar_response"],
             height=220,
             disabled=True,
-            placeholder="여기에 모델 응답이 표시됩니다.",
+            placeholder="The model response will appear here.",
         )
 
 
@@ -1465,7 +1466,7 @@ def _extract_features_from_images(
         _suppress_transformers_path_alias_warning()
         from transformers import AutoImageProcessor, AutoModelForImageClassification
     except ImportError:
-        st.error("필요한 라이브러리가 없습니다. torch, transformers, Pillow를 설치해주세요.")
+        st.error("Required libraries are missing. Please install torch, transformers, and Pillow.")
         return None, []
     
     try:
@@ -1508,11 +1509,11 @@ def _extract_features_from_images(
                     features_list.append(feature_vector)
                     processed_paths.append(image_path)
                 except Exception as e:
-                    st.warning(f"특성 추출 실패 {Path(image_path).name}: {e}")
+                    st.warning(f"Feature extraction failed for {Path(image_path).name}: {e}")
                     continue
         
         if not features_list:
-            st.error("어떤 이미지도 처리할 수 없습니다.")
+            st.error("No images could be processed.")
             return None, []
         
         features_array = np.array(features_list, dtype=np.float32)
@@ -1525,5 +1526,5 @@ def _extract_features_from_images(
         
         return features_array, processed_paths
     except Exception as e:
-        st.error(f"모델 로드 실패: {e}")
+        st.error(f"Failed to load the model: {e}")
         return None, []

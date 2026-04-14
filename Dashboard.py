@@ -98,7 +98,7 @@ def main() -> None:
     configure_page("Dashboard Home")
 
     st.subheader("Data Period")
-    st.caption("조회할 데이터 기간을 선택해 주세요.")
+    st.caption("Select the date range to query.")
 
     query_cols = st.columns(3, gap="large")
     with query_cols[0]:
@@ -113,7 +113,7 @@ def main() -> None:
             default_start_date = CSV_DEFAULT_QUERY_START_DATE
 
         selected_start_date = st.date_input(
-            "시작 날짜",
+            "Start date",
             value=default_start_date,
             key="dashboard_query_date_start_input",
         )
@@ -130,16 +130,16 @@ def main() -> None:
             default_end_date = CSV_DEFAULT_QUERY_END_DATE
 
         selected_end_date = st.date_input(
-            "종료 날짜",
+            "End date",
             value=default_end_date,
             key="dashboard_query_date_end_input",
         )
 
     with query_cols[2]:
         st.write("")  # spacer for alignment
-        if st.button("데이터 조회", key="dashboard_query_button", width="stretch"):
+        if st.button("Load Data", key="dashboard_query_button", width="stretch"):
             if selected_start_date > selected_end_date:
-                st.error("시작 날짜가 종료 날짜보다 뒤에 있습니다.")
+                st.error("The start date cannot be later than the end date.")
             else:
                 start_iso = selected_start_date.isoformat()
                 end_iso = selected_end_date.isoformat()
@@ -159,12 +159,12 @@ def main() -> None:
                 "data_source": "supabase",
                 "query_date_start": "not_loaded",
                 "query_date_end": "not_loaded",
-                "status": "대기",
+                "status": "Pending",
             },
             [],
             [],
         )
-        st.info("위에서 조회 날짜 범위를 선택한 뒤 `데이터 조회`를 눌러주세요.")
+        st.info("Select a date range above, then click `Load Data`.")
         return
 
     query_date_start = str(st.session_state.get("dashboard_query_date_start", "")).strip() or None

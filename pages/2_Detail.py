@@ -39,7 +39,7 @@ def _render_detail_inference_model_selector(selected_records: list[dict[str, Any
         selector_key="detail_inference_model_selector",
         active_key="detail_inference_model_active",
         section_title="Image Inference",
-        helper_text="모델을 고른 뒤 Start infer를 눌러 현재 선택 이미지를 다시 예측합니다.",
+        helper_text="Choose a model, then click Start infer to run inference again on the currently selected images.",
         label="Inference model",
         add_divider=True,
     )
@@ -50,7 +50,7 @@ def _render_detail_inference_model_selector(selected_records: list[dict[str, Any
         disabled=selected_model_dir is None or not selected_records,
     )
     if selected_records and model_changed:
-        st.sidebar.caption("모델이 변경되었습니다. `Start infer`를 눌러 새 모델로 재추론하세요.")
+        st.sidebar.caption("The model has changed. Click `Start infer` to rerun inference with the new model.")
     return selected_model_dir, model_changed, start_infer
 
 
@@ -138,7 +138,7 @@ def _load_detail_classifier_runtime(model_dir: Path) -> tuple[Any, Any, str, flo
         _suppress_transformers_path_alias_warning()
         from transformers import AutoImageProcessor, AutoModelForImageClassification
     except ImportError as exc:
-        raise RuntimeError("이미지 재추론에 필요한 torch/transformers 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch/transformers packages required for image reinference are not installed.") from exc
 
     resolved_model_dir = resolve_base_model_dir(model_dir)
     cached_model_dir = st.session_state.get("detail_inference_runtime_model_dir")
@@ -193,7 +193,7 @@ def _predict_detail_records_with_model(
         import torch
         from PIL import Image
     except ImportError as exc:
-        raise RuntimeError("이미지 재추론에 필요한 Pillow 패키지가 없습니다.") from exc
+        raise RuntimeError("The Pillow package required for image reinference is not installed.") from exc
 
     image_processor, model, device_name, initial_model_load_time_milliseconds = _load_detail_classifier_runtime(
         resolved_model_dir
@@ -210,7 +210,7 @@ def _predict_detail_records_with_model(
         if device.type == "cuda":
             torch.cuda.synchronize(device)
 
-    with st.spinner(f"{resolved_model_dir.name} 모델로 선택 이미지를 다시 예측하는 중입니다..."):
+    with st.spinner(f"Running inference again on the selected images with {resolved_model_dir.name}..."):
         with torch.no_grad():
             for record in selected_records:
                 updated_record = dict(record)
@@ -327,37 +327,37 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
         from sklearn.decomposition import PCA
         from sklearn.preprocessing import StandardScaler
     except ImportError:
-        st.error("필요한 라이브러리가 없습니다. scikit-learn과 plotly를 설치해주세요.")
+        st.error("Required libraries are missing. Please install scikit-learn and plotly.")
         return
 
     st.subheader("3D Model Prediction Visualization")
-    st.caption("TensorFlow Projector 스타일의 3D 특성 공간 시각화")
+    st.caption("A TensorFlow Projector-style 3D feature space visualization.")
 
     if len(selected_records) < 3:
-        st.info("3D Visualization을 사용하려면 최소 3개 이상의 이미지를 선택해주세요.")
+        st.info("Select at least 3 images to use 3D Visualization.")
         return
 
     image_paths = [record["path"] for record in selected_records if record["exists"]]
     if not image_paths:
-        st.warning("표시할 이미지가 없습니다.")
+        st.warning("There are no images to display.")
         return
 
     base_model_dir = _get_detail_base_model_dir(selected_records)
     selected_model_dirs = _resolve_selected_model_dirs(selected_records)
     if len(selected_model_dirs) > 1:
-        st.warning("선택한 이미지들이 서로 다른 추론 모델에서 생성되었습니다. 가장 첫 번째 모델 기준으로 3D 특성을 계산합니다.")
+        st.warning("The selected images were generated with different inference models. The 3D features will be computed using the first model.")
 
-    with st.spinner("모델에서 특성을 추출하는 중입니다..."):
+    with st.spinner("Extracting features from the model..."):
         features, processed_paths = _extract_features_from_images(image_paths, base_model_dir)
 
     if features is None or len(features) == 0:
-        st.error("특성 추출에 실패했습니다.")
+        st.error("Failed to extract features.")
         return
 
     record_by_path = {record["path"]: record for record in selected_records if record["exists"]}
     plotted_records = [record_by_path[path] for path in processed_paths if path in record_by_path]
     if not plotted_records:
-        st.error("시각화에 사용할 라벨 정보를 찾을 수 없습니다.")
+        st.error("Could not find label information for visualization.")
         return
 
     labels = [record["label"] for record in plotted_records]
@@ -369,12 +369,12 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
     col1, col2 = st.columns(2)
     with col1:
         reduction_method = st.selectbox(
-            "차원 축소 방법",
+            "Dimensionality reduction",
             ["PCA", "t-SNE", "UMAP"],
-            help="고차원 특성을 3D로 축소하는 방법을 선택하세요",
+            help="Choose how high-dimensional features should be reduced into 3D.",
         )
     with col2:
-        show_labels = st.checkbox("라벨 표시", value=False)
+        show_labels = st.checkbox("Show labels", value=False)
 
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
@@ -382,31 +382,31 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
     if reduction_method == "PCA":
         reducer = PCA(n_components=3, random_state=42)
         features_3d = reducer.fit_transform(features_scaled)
-        reduction_info = f"PCA (설명된 분산: {sum(reducer.explained_variance_ratio_):.2%})"
+        reduction_info = f"PCA (explained variance: {sum(reducer.explained_variance_ratio_):.2%})"
     elif reduction_method == "t-SNE":
         try:
             from sklearn.manifold import TSNE
 
-            with st.spinner("t-SNE 계산 중... (시간이 걸릴 수 있습니다)"):
+            with st.spinner("Computing t-SNE... this may take some time."):
                 reducer = TSNE(n_components=3, random_state=42, perplexity=min(30, len(features) - 1))
                 features_3d = reducer.fit_transform(features_scaled)
             reduction_info = "t-SNE"
         except Exception as exc:
-            st.error(f"t-SNE 계산 실패: {exc}")
+            st.error(f"t-SNE computation failed: {exc}")
             return
     else:
         try:
             import umap
 
-            with st.spinner("UMAP 계산 중..."):
+            with st.spinner("Computing UMAP..."):
                 reducer = umap.UMAP(n_components=3, random_state=42)
                 features_3d = reducer.fit_transform(features_scaled)
             reduction_info = "UMAP"
         except ImportError:
-            st.warning("UMAP을 사용하려면 `pip install umap-learn`을 실행해주세요. PCA를 대신 사용합니다.")
+            st.warning("Run `pip install umap-learn` to use UMAP. PCA will be used instead.")
             reducer = PCA(n_components=3, random_state=42)
             features_3d = reducer.fit_transform(features_scaled)
-            reduction_info = "PCA (UMAP 설치 필요)"
+            reduction_info = "PCA (UMAP not installed)"
 
     features_3d_display = np.asarray(features_3d, dtype=np.float32)
     axis_std = features_3d_display.std(axis=0)
@@ -493,7 +493,7 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
     )
     st.plotly_chart(class_distribution_fig, width="stretch")
 
-    with st.expander("이미지 상세 정보", expanded=False):
+    with st.expander("Image details", expanded=False):
         details_df = pd.DataFrame(
             {
                 "Filename": [record["filename"] for record in plotted_records],
@@ -508,7 +508,7 @@ def _resolve_target_label_index(model: Any, label_name: str, input_tensor: Any) 
     try:
         import torch
     except ImportError as exc:
-        raise RuntimeError("XAI 계산에 필요한 torch 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch package required for XAI is not installed.") from exc
 
     label2id = getattr(model.config, "label2id", {}) or {}
     if label_name in label2id:
@@ -553,7 +553,7 @@ def _render_bottom_right_pagination_controls(
             page_cols = st.columns([3, 1, 1], gap="small")
             with page_cols[0]:
                 st.text_input(
-                    "현재 페이지",
+                    "Current page",
                     key=page_display_key,
                     label_visibility="collapsed",
                     disabled=True,
@@ -572,7 +572,7 @@ def _render_bottom_right_pagination_controls(
             page_size_cols = st.columns([3, 1, 1], gap="small")
             with page_size_cols[0]:
                 st.text_input(
-                    "페이지 크기",
+                    "Page size",
                     key=page_size_display_key,
                     label_visibility="collapsed",
                     disabled=True,
@@ -602,21 +602,21 @@ def _render_detail_xai_visualization(
         from openxai import Explainer
     except ImportError as exc:
         st.error(
-            "XAI 시각화에 필요한 패키지를 불러오지 못했습니다. "
-            "`captum` 및 OpenXAI 의존성이 설치되어 있는지 확인해주세요."
+            "The packages required for XAI visualization could not be loaded. "
+            "Please make sure `captum` and the OpenXAI dependencies are installed."
         )
         st.caption(f"Import error: {exc}")
         return
 
     st.subheader("XAI Visualization (OpenXAI)")
-    st.caption("OpenXAI attribution을 기반으로 원본 이미지 위에 히트맵을 오버레이합니다.")
+    st.caption("Overlays a heatmap on the original image using OpenXAI attributions.")
 
     if not selected_records:
-        st.info("XAI를 표시할 이미지가 없습니다.")
+        st.info("There are no images to display for XAI.")
         return
 
     if selected_model_dir is None:
-        st.info("먼저 사이드바에서 추론 모델을 선택해주세요.")
+        st.info("Please select an inference model in the sidebar first.")
         return
 
     openxai_methods = ["grad", "sg", "itg", "ig", "lime", "shap", "control"]
@@ -626,10 +626,10 @@ def _render_detail_xai_visualization(
         options=openxai_methods,
         index=0,
         key="detail_xai_method_selector",
-        help="현재 이미지 분류 모델에서는 grad/sg/itg/ig를 권장합니다.",
+        help="For the current image classification model, grad, sg, itg, and ig are recommended.",
     )
     overlay_alpha = st.slider(
-        "히트맵 오버레이 강도",
+        "Heatmap overlay strength",
         min_value=0.1,
         max_value=0.9,
         value=0.45,
@@ -637,7 +637,7 @@ def _render_detail_xai_visualization(
         key="detail_xai_overlay_alpha",
     )
     colormap_name = st.selectbox(
-        "히트맵 컬러맵",
+        "Heatmap colormap",
         options=["turbo", "jet", "magma", "viridis"],
         index=0,
         key="detail_xai_colormap",
@@ -645,14 +645,14 @@ def _render_detail_xai_visualization(
 
     if selected_method not in supported_methods:
         st.warning(
-            "선택한 method는 현재 이미지 모델 파이프라인에서 바로 지원되지 않습니다. "
-            "`grad`, `sg`, `itg`, `ig` 중에서 선택해주세요."
+            "The selected method is not directly supported by the current image model pipeline. "
+            "Please choose from `grad`, `sg`, `itg`, or `ig`."
         )
         return
 
     valid_records = [record for record in selected_records if record.get("exists")]
     if not valid_records:
-        st.info("존재하는 이미지가 없어 XAI를 계산할 수 없습니다.")
+        st.info("XAI cannot be computed because no existing images were found.")
         return
 
     total_images = len(valid_records)
@@ -666,7 +666,7 @@ def _render_detail_xai_visualization(
     page_end = page_start + xai_page_size
     page_records = valid_records[page_start:page_end]
 
-    st.caption(f"전체 {total_images}개 이미지 | {current_xai_page}/{xai_total_pages} 페이지")
+    st.caption(f"{total_images} images total | Page {current_xai_page}/{xai_total_pages}")
 
     try:
         image_processor, base_model, device_name, _ = _load_detail_classifier_runtime(selected_model_dir)
@@ -684,7 +684,7 @@ def _render_detail_xai_visualization(
         openxai_model = _OpenXAILogitsModel(base_model).to(device)
         explainer = Explainer(method=selected_method, model=openxai_model)
     except Exception as exc:
-        st.error(f"OpenXAI explainer 초기화에 실패했습니다: {exc}")
+        st.error(f"Failed to initialize the OpenXAI explainer: {exc}")
         return
 
     cmap = colormaps.get_cmap(colormap_name)
@@ -715,7 +715,7 @@ def _render_detail_xai_visualization(
             elif attribution.ndim == 3:
                 attribution_map = attribution[0].abs()
             else:
-                raise ValueError(f"예상하지 못한 attribution shape: {tuple(attribution.shape)}")
+                raise ValueError(f"Unexpected attribution shape: {tuple(attribution.shape)}")
 
             attribution_map = attribution_map.unsqueeze(0).unsqueeze(0)
             attribution_map = F.interpolate(
@@ -754,7 +754,7 @@ def _render_detail_xai_visualization(
             st.image(item["heatmap"], caption=f"XAI ({selected_method})", width="stretch")
         with c3:
             st.image(item["overlay"], caption="Overlay", width="stretch")
-        st.caption(f"Prediction: {item['label']} | target_id: {item['target_idx']}")
+        st.caption(f"Prediction: {item['label']} | Target ID: {item['target_idx']}")
 
     _render_bottom_right_pagination_controls(
         total_items=total_images,
@@ -765,7 +765,7 @@ def _render_detail_xai_visualization(
     )
 
     if xai_errors:
-        st.warning("일부 XAI 계산에 실패했습니다: " + "; ".join(xai_errors[:3]))
+        st.warning("Some XAI computations failed: " + "; ".join(xai_errors[:3]))
 
 
 def render_detail_page(image_records) -> None:
@@ -846,7 +846,7 @@ def render_detail_page(image_records) -> None:
         page_records = selected_records[result_start:result_end]
 
         with tab1:
-            st.caption(f"전체 {result_total}개 이미지 | {current_result_page}/{result_total_pages} 페이지")
+            st.caption(f"{result_total} images total | Page {current_result_page}/{result_total_pages}")
 
             with st.expander(f"Selected images ({len(page_records)}/{result_total})", expanded=True):
                 cols = st.columns(5, gap="large")
@@ -868,17 +868,17 @@ def render_detail_page(image_records) -> None:
 
         with tab2:
             if len(selected_records) < 3:
-                st.info("3D Visualization을 사용하려면 최소 3개 이상의 이미지를 선택해주세요.")
+                st.info("Select at least 3 images to use 3D Visualization.")
             else:
                 _render_detail_3d_visualization(selected_records)
 
         with tab3:
             _render_detail_xai_visualization(selected_records, selected_model_dir)
     else:
-        st.info("여러 이미지를 선택하려면 위에서 항목을 여러 개 선택하세요.")
+        st.info("Select multiple items above to view multiple images.")
 
     if selected_records:
-        st.caption("Interactive fine-tuning은 `Fine-tuning` 페이지에서 실행할 수 있습니다.")
+        st.caption("Interactive fine-tuning can be run on the `Fine-tuning` page.")
 
 
 configure_page("Detail")

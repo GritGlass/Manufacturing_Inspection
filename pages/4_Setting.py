@@ -78,7 +78,7 @@ def render_setting_page(config) -> None:
     st.session_state.setdefault("supabase_key_pending", current_supabase_settings["key"])
 
     with top_left:
-        if st.button("DB setting", width="stretch"):
+        if st.button("DB Settings", width="stretch"):
             st.session_state["db_setting_panel_open"] = not bool(st.session_state["db_setting_panel_open"])
             st.session_state["supabase_url_pending"] = current_supabase_settings["url"]
             st.session_state["supabase_key_pending"] = current_supabase_settings["key"]
@@ -90,8 +90,8 @@ def render_setting_page(config) -> None:
         with st.container(border=True):
             st.subheader("Supabase DB")
             st.caption(
-                "`.streamlit/secrets.toml`의 `connections.supabase` 값을 UI에서 수정합니다. "
-                "저장 후에는 앱을 다시 실행하면 가장 확실합니다."
+                "Edit the `connections.supabase` values in `.streamlit/secrets.toml` from the UI. "
+                "Restarting the app after saving is the most reliable option."
             )
             st.text_input(
                 "Supabase URL",
@@ -107,7 +107,7 @@ def render_setting_page(config) -> None:
             button_col, close_col = st.columns(2, gap="large")
             with button_col:
                 save_db_clicked = st.button(
-                    "Save DB setting",
+                    "Save DB Settings",
                     key="db_setting_apply",
                     type="primary",
                     width="stretch",
@@ -124,15 +124,15 @@ def render_setting_page(config) -> None:
                     supabase_url = str(st.session_state.get("supabase_url_pending", "")).strip()
                     supabase_key = str(st.session_state.get("supabase_key_pending", "")).strip()
                     if not supabase_url:
-                        raise RuntimeError("Supabase URL을 입력해 주세요.")
+                        raise RuntimeError("Please enter the Supabase URL.")
                     if not supabase_key:
-                        raise RuntimeError("Supabase KEY를 입력해 주세요.")
+                        raise RuntimeError("Please enter the Supabase key.")
 
                     _write_supabase_secret_settings(supabase_url, supabase_key)
                     load_dashboard_data.clear()
                     st.cache_data.clear()
                     st.session_state["db_setting_status"] = "done"
-                    st.session_state["db_setting_notice"] = "Supabase DB 설정이 저장되었습니다."
+                    st.session_state["db_setting_notice"] = "The Supabase DB settings have been saved."
                     _append_app_log(
                         log_type="done",
                         source="Setting",
@@ -143,7 +143,7 @@ def render_setting_page(config) -> None:
                     st.rerun()
                 except Exception as exc:
                     st.session_state["db_setting_status"] = "error"
-                    st.session_state["db_setting_notice"] = "Supabase DB 설정 저장에 실패했습니다."
+                    st.session_state["db_setting_notice"] = "Failed to save the Supabase DB settings."
                     _append_app_log(
                         log_type="error",
                         source="Setting",
@@ -178,7 +178,7 @@ def render_setting_page(config) -> None:
 
     with st.container(border=True):
         st.subheader("LLM Runtime")
-        st.caption("사이드바 LLM 응답과 Summary 분석 코멘트에 사용할 모델 설정입니다.")
+        st.caption("These settings control the model used for sidebar LLM responses and Summary analysis comments.")
 
         if available_model_values:
             current_model_value = str(pending_llm_settings["model_dir"])
@@ -218,11 +218,11 @@ def render_setting_page(config) -> None:
                 try:
                     pending_model_dir = Path(str(st.session_state["llm_model_dir_pending"]))
                     if not available_model_values:
-                        raise RuntimeError("사용 가능한 로컬 LLM 모델이 없습니다.")
+                        raise RuntimeError("No local LLM models are available.")
                     if str(pending_model_dir) not in available_model_values:
-                        raise RuntimeError("선택한 LLM 모델을 찾을 수 없습니다.")
+                        raise RuntimeError("The selected LLM model could not be found.")
                     if not is_model_downloaded(pending_model_dir):
-                        raise RuntimeError("선택한 LLM 모델 파일이 완전히 준비되지 않았습니다.")
+                        raise RuntimeError("The selected LLM model files are not fully prepared yet.")
 
                     st.session_state["llm_model_dir"] = str(pending_model_dir)
                     st.session_state["llm_temperature"] = max(
@@ -234,7 +234,7 @@ def render_setting_page(config) -> None:
                         int(st.session_state["llm_max_new_tokens_pending"]),
                     )
                     st.session_state["llm_setting_status"] = "done"
-                    st.session_state["llm_setting_notice"] = "LLM runtime 설정이 적용되었습니다."
+                    st.session_state["llm_setting_notice"] = "The LLM runtime settings have been applied."
                     _append_app_log(
                         log_type="done",
                         source="Setting",
@@ -247,7 +247,7 @@ def render_setting_page(config) -> None:
                     )
                 except Exception as exc:
                     st.session_state["llm_setting_status"] = "error"
-                    st.session_state["llm_setting_notice"] = "LLM runtime 설정 적용에 실패했습니다."
+                    st.session_state["llm_setting_notice"] = "Failed to apply the LLM runtime settings."
                     _append_app_log(
                         log_type="error",
                         source="Setting",
@@ -276,7 +276,7 @@ def render_setting_page(config) -> None:
             st.caption(f"Applied model path: {_to_project_relative_path(applied_llm_settings['model_dir'])}")
             st.caption(f"Pending model path: {_to_project_relative_path(selected_model)}")
         else:
-            st.warning(f"사용 가능한 로컬 LLM 모델을 찾지 못했습니다: {_to_project_relative_path(DEFAULT_LLM_MODEL_DIR.parent)}")
+            st.warning(f"No available local LLM models were found: {_to_project_relative_path(DEFAULT_LLM_MODEL_DIR.parent)}")
 
     with st.expander("Current configuration", expanded=False):
         config_frame = pd.DataFrame(

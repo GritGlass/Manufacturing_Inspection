@@ -82,7 +82,7 @@ def _is_supported_image_path(path: Path) -> bool:
 
 def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     if SupabaseConnection is None:
-        raise RuntimeError("st_supabase_connection 패키지를 찾지 못했습니다.")
+        raise RuntimeError("The `st_supabase_connection` package could not be found.")
 
     connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
     try:
@@ -97,7 +97,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     except Exception as exc:
         client = getattr(connection, "client", None)
         if client is None:
-            raise RuntimeError(f"Supabase semiconductor 조회에 실패했습니다: {exc}") from exc
+            raise RuntimeError(f"Failed to query the Supabase semiconductor table: {exc}") from exc
 
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS)
         if hasattr(query_builder, "order"):
@@ -109,7 +109,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
 
 def _fetch_csv_status_rows() -> list[dict[str, Any]]:
     if not CSV_FALLBACK_DATA_PATH.exists():
-        raise RuntimeError(f"CSV fallback 파일이 없습니다: {CSV_FALLBACK_DATA_PATH}")
+        raise RuntimeError(f"The CSV fallback file does not exist: {CSV_FALLBACK_DATA_PATH}")
 
     rows: list[dict[str, Any]] = []
     with CSV_FALLBACK_DATA_PATH.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -141,7 +141,7 @@ def load_supabase_image_status_frame() -> pd.DataFrame:
             rows = _fetch_csv_status_rows()
         except Exception as csv_error:
             raise RuntimeError(
-                "Supabase와 CSV fallback 모두에서 margin sampling 상태를 불러오지 못했습니다. "
+                "Failed to load margin sampling status from both Supabase and the CSV fallback. "
                 f"supabase_error={supabase_error} | csv_error={csv_error}"
             ) from csv_error
 
@@ -223,7 +223,7 @@ def _load_margin_sampling_runtime(model_dir_value: str) -> tuple[Any, Any, str]:
         except ImportError:
             from transformers import AutoFeatureExtractor as AutoImageProcessor
     except ImportError as exc:
-        raise RuntimeError("margin sampling에 필요한 torch/transformers 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch/transformers packages required for margin sampling are not installed.") from exc
 
     resolved_model_dir = resolve_base_model_dir(model_dir_value)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -255,7 +255,7 @@ def build_margin_sampling_frame(
         import torch
         from PIL import Image
     except ImportError as exc:
-        raise RuntimeError("margin sampling에 필요한 torch/Pillow 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch/Pillow packages required for margin sampling are not installed.") from exc
 
     resolved_model_dir = resolve_base_model_dir(base_model_dir)
     image_processor, model, device_name = _load_margin_sampling_runtime(str(resolved_model_dir))

@@ -89,7 +89,7 @@ def _normalize_cluster_label(value: Any) -> str:
 
 def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     if SupabaseConnection is None:
-        raise RuntimeError("st_supabase_connection 패키지를 찾지 못했습니다.")
+        raise RuntimeError("The `st_supabase_connection` package could not be found.")
 
     connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
     try:
@@ -104,7 +104,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
     except Exception as exc:
         client = getattr(connection, "client", None)
         if client is None:
-            raise RuntimeError(f"Supabase semiconductor 조회에 실패했습니다: {exc}") from exc
+            raise RuntimeError(f"Failed to query the Supabase semiconductor table: {exc}") from exc
 
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS)
         if hasattr(query_builder, "order"):
@@ -268,7 +268,7 @@ def _build_shared_embedding(
         from sklearn.manifold import TSNE
         from sklearn.preprocessing import StandardScaler
     except ImportError as exc:
-        raise RuntimeError("boundary sampling에 필요한 scikit-learn 패키지가 없습니다.") from exc
+        raise RuntimeError("The scikit-learn package required for boundary sampling is not installed.") from exc
 
     if trained_features.size == 0 or untrained_features.size == 0:
         return (
@@ -355,7 +355,7 @@ def _compute_min_boundary_distances(
     try:
         import torch
     except ImportError as exc:
-        raise RuntimeError("boundary sampling에 필요한 torch 패키지가 없습니다.") from exc
+        raise RuntimeError("The torch package required for boundary sampling is not installed.") from exc
 
     if len(candidate_points) == 0 or len(boundary_points) == 0:
         return (
@@ -382,14 +382,14 @@ def _compute_min_boundary_distances(
                 distance_batch = torch.cdist(candidate_batch, boundary_batch, p=2)
                 batch_distances.append(distance_batch)
 
-            # 모든 boundary chunks의 거리를 concatenate하고 평균 계산
+            # Concatenate distances from all boundary chunks and compute the mean distance.
             all_distances = torch.cat(batch_distances, dim=1)
             mean_distance = all_distances.mean(dim=1)
             
             mean_distance_chunks.append(mean_distance.detach().cpu())
 
     mean_distances = torch.cat(mean_distance_chunks).numpy().astype(np.float32, copy=False)
-    # nearest_indices는 함수 시그니처 호환성을 위해 빈 배열로 반환 (평균 거리 계산에서는 사용 안 함)
+    # Return an empty array for nearest_indices to preserve function signature compatibility.
     nearest_indices = np.empty((len(candidate_points),), dtype=np.int64)
     return mean_distances, nearest_indices, device.type
 
@@ -412,7 +412,7 @@ def build_boundary_sampling_frame(
     untrained_source_frame = _build_candidate_frame_from_visible_paths(image_paths, source_frame)
 
     if trained_source_frame.empty:
-        raise RuntimeError("trained=True 데이터가 없어 boundary sampling을 계산할 수 없습니다.")
+        raise RuntimeError("Boundary sampling cannot be computed because there is no `trained=True` data.")
     if untrained_source_frame.empty:
         return _empty_boundary_result_frame()
 
@@ -421,7 +421,7 @@ def build_boundary_sampling_frame(
     untrained_features, untrained_processed_frame = _extract_partition_features(untrained_source_frame, resolved_model_dir)
 
     if len(trained_features) == 0:
-        raise RuntimeError("trained=True 데이터에서 feature를 추출하지 못했습니다.")
+        raise RuntimeError("Failed to extract features from the `trained=True` data.")
     if len(untrained_features) == 0:
         return _empty_boundary_result_frame()
 
@@ -439,7 +439,7 @@ def build_boundary_sampling_frame(
 
     boundary_frame = _build_boundary_point_frame(trained_embedding_frame)
     if boundary_frame.empty:
-        raise RuntimeError("trained=True 데이터의 boundary point를 계산하지 못했습니다.")
+        raise RuntimeError("Failed to compute boundary points from the `trained=True` data.")
 
     mean_distances, nearest_indices, distance_device = _compute_min_boundary_distances(
         candidate_points=untrained_embedding,

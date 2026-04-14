@@ -43,8 +43,8 @@ def _import_runtime_dependencies() -> tuple[Any, Any, Any]:
         from transformers import AutoModelForImageTextToText, AutoProcessor
     except ImportError as exc:
         raise RuntimeError(
-            "로컬 Gemma 실행에 필요한 패키지가 없습니다. "
-            "먼저 `pip install -r 05_Manufacutre/requirements.txt`를 실행해 주세요."
+            "The packages required to run the local Gemma model are not installed. "
+            "Please run `pip install -r requirements.txt` first."
         ) from exc
 
     return torch, AutoModelForImageTextToText, AutoProcessor
@@ -55,7 +55,7 @@ def are_runtime_dependencies_available() -> tuple[bool, str]:
         _import_runtime_dependencies()
     except RuntimeError as exc:
         return False, str(exc)
-    return True, "로컬 실행 패키지가 준비되어 있습니다."
+    return True, "Local runtime packages are ready."
 
 
 def _resolve_model_dir(model_dir: str | Path | None = None) -> Path:
@@ -90,8 +90,8 @@ def load_model(model_dir: str | Path | None = None) -> tuple[Any, Any, Any]:
 
     if not is_model_downloaded(resolved_model_dir):
         raise RuntimeError(
-            "로컬 모델 파일이 없습니다. "
-            f"`{resolved_model_dir}` 경로에 모델을 먼저 준비해 주세요."
+            "The local model files are missing. "
+            f"Please prepare the model first at `{resolved_model_dir}`."
         )
 
     processor = AutoProcessor.from_pretrained(resolved_model_dir)
@@ -192,4 +192,4 @@ def generate_response(
         )
 
     decoded = _extract_response_text(processor, outputs, input_len).strip()
-    return decoded or "응답이 비어 있습니다. 프롬프트나 모델 상태를 확인해 주세요."
+    return decoded or "The response was empty. Please check the prompt or the model state."
