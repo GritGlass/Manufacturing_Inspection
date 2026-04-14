@@ -101,4 +101,4 @@ streamlit run streamlit_dashboard.py
 
 #### Reference
 - Data reference : [Semiconductor](https://www.kaggle.com/datasets/drtawfikrrahman/multi-class-semiconductor-wafer-image-dataset)
-- Model : [Mobilevit_samll](https://huggingface.co/apple/mobilevit-small)
+- Model : [Mobilevit_small](https://huggingface.co/apple/mobilevit-small)
