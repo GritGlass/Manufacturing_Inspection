@@ -48,7 +48,7 @@ Required setup:
 ### Dashboard
 
 ```bash
-streamlit run streamlit_dashboard.py
+streamlit run Dashboard.py
 ```
 
 ---
