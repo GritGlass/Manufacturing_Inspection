@@ -7,6 +7,9 @@ import pandas as pd
 import streamlit as st
 
 from scripts.utils import (
+    SUPABASE_CONNECTION_NAME,
+    SUPABASE_IMAGE_TABLE,
+    SupabaseConnection,
     build_aggregate_run,
     build_label_distribution_frame,
     configure_page,
@@ -94,9 +97,51 @@ def render_home_page(config: dict[str, Any], runs: list[dict[str, Any]], log_ent
         st.dataframe(config_frame, width="stretch", hide_index=True)
 
 
-def main() -> None:
-    configure_page("Dashboard Home")
+def _fetch_supabase_table_list() -> list[str]:
+    """Return public table names from the connected Supabase project."""
+    if SupabaseConnection is None:
+        return [SUPABASE_IMAGE_TABLE]
+    try:
+        connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
+        client = getattr(connection, "client", None)
+        if client is None:
+            return [SUPABASE_IMAGE_TABLE]
+        result = (
+            client.table("information_schema.tables")
+            .select("table_name")
+            .eq("table_schema", "public")
+            .eq("table_type", "BASE TABLE")
+            .order("table_name")
+            .execute()
+        )
+        rows = getattr(result, "data", []) or []
+        names = [row["table_name"] for row in rows if isinstance(row, dict) and row.get("table_name")]
+        return names if names else [SUPABASE_IMAGE_TABLE]
+    except Exception:
+        return [SUPABASE_IMAGE_TABLE]
 
+
+def set_query_table() -> None:
+    st.subheader("Data Source")
+    st.caption("Select the Supabase table to query.")
+
+    table_list = _fetch_supabase_table_list()
+    current_table = str(st.session_state.get("dashboard_query_table", SUPABASE_IMAGE_TABLE)).strip()
+    default_index = table_list.index(current_table) if current_table in table_list else 0
+
+    selected_table = st.selectbox(
+        "Table",
+        options=table_list,
+        index=default_index,
+        key="dashboard_query_table_selector",
+    )
+    if selected_table != st.session_state.get("dashboard_query_table"):
+        st.session_state["dashboard_query_table"] = selected_table
+        st.session_state["dashboard_data_loaded"] = False
+        load_dashboard_data.clear()
+
+
+def set_query_dates():
     st.subheader("Data Period")
     st.caption("Select the date range to query.")
 
@@ -150,21 +195,18 @@ def main() -> None:
                 st.session_state["dashboard_data_loaded"] = True
                 load_dashboard_data.clear()
                 st.rerun()
-    
-    st.divider()
 
-    if not bool(st.session_state.get("dashboard_data_loaded", False)):
-        render_home_page(
-            {
-                "data_source": "supabase",
-                "query_date_start": "not_loaded",
-                "query_date_end": "not_loaded",
-                "status": "Pending",
-            },
-            [],
-            [],
-        )
-        st.info("Select a date range above, then click `Load Data`.")
+def main() -> None:
+    configure_page("Dashboard Home")
+
+    data_loaded = bool(st.session_state.get("dashboard_data_loaded", False))
+
+    with st.expander("Query Settings", expanded=not data_loaded):
+        set_query_table()
+        st.divider()
+        set_query_dates()
+
+    if not data_loaded:
         return
 
     query_date_start = str(st.session_state.get("dashboard_query_date_start", "")).strip() or None
