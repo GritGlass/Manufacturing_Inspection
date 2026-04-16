@@ -1027,5 +1027,13 @@ def render_fine_tuning_page(image_records) -> None:
 
 
 configure_page("Fine-tuning")
-_config, _runs, image_records, _log_entries = load_dashboard_data()
+if not bool(st.session_state.get("dashboard_data_loaded", False)):
+    st.info("Please go to the Dashboard page and click **Load Data** first.")
+    st.stop()
+_query_date_start = str(st.session_state.get("dashboard_query_date_start", "")).strip() or None
+_query_date_end = str(st.session_state.get("dashboard_query_date_end", "")).strip() or None
+_config, _runs, image_records, _log_entries = load_dashboard_data(
+    query_date_start=_query_date_start,
+    query_date_end=_query_date_end,
+)
 render_fine_tuning_page(image_records)
