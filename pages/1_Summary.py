@@ -14,6 +14,7 @@ import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BASE_DIR = ROOT_DIR
+SUMMARY_REPORT_OUTPUT_DIR = BASE_DIR / "output" / "reports"
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -300,6 +301,14 @@ def _sanitize_analysis_comment(text: str) -> str:
     ]
     cleaned = "\n".join(cleaned_lines).strip()
     return cleaned if cleaned else "Analysis comment is not available."
+
+
+def _persist_requested_summary_report(report_pdf: bytes) -> str:
+    SUMMARY_REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = SUMMARY_REPORT_OUTPUT_DIR / f"manufacturing_summary_report_{timestamp}.pdf"
+    report_path.write_bytes(report_pdf)
+    return str(report_path)
 
 
 def _prepare_pdf_runtime() -> tuple[Any, Any, Any, Any]:
@@ -762,6 +771,19 @@ def render_summary_page(config, runs, image_records) -> None:
         else:
             report_pdf = b""
 
+    summary_report_notice = str(st.session_state.get("summary_download_report_notice", "") or "")
+    if st.session_state.get("summary_download_report_requested"):
+        if report_pdf:
+            report_path = _persist_requested_summary_report(report_pdf)
+            st.session_state["summary_download_report_requested"] = False
+            st.session_state["summary_download_report_path"] = report_path
+            summary_report_notice = f"MCP report request completed. Saved copy: {report_path}"
+            st.session_state["summary_download_report_notice"] = summary_report_notice
+        else:
+            st.session_state["summary_download_report_requested"] = False
+            summary_report_notice = "MCP report request could not be completed because no report PDF is available."
+            st.session_state["summary_download_report_notice"] = summary_report_notice
+
     left_col, right_col = st.columns([1.2, 1.0], gap="large")
 
     with left_col:
@@ -785,8 +807,15 @@ def render_summary_page(config, runs, image_records) -> None:
             file_name="manufacturing_summary_report.pdf",
             mime="application/pdf",
             disabled=not bool(report_pdf),
+            key="summary_download_report_button",
             width="stretch",
         )
+
+        if summary_report_notice:
+            if summary_report_notice.startswith("MCP report request completed"):
+                st.success(summary_report_notice)
+            else:
+                st.warning(summary_report_notice)
 
         if summary_run:
             st.caption(

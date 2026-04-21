@@ -78,7 +78,7 @@ def render_setting_page(config) -> None:
     st.session_state.setdefault("supabase_key_pending", current_supabase_settings["key"])
 
     with top_left:
-        if st.button("DB Settings", width="stretch"):
+        if st.button("DB Settings", key="db_setting_toggle_button", width="stretch"):
             st.session_state["db_setting_panel_open"] = not bool(st.session_state["db_setting_panel_open"])
             st.session_state["supabase_url_pending"] = current_supabase_settings["url"]
             st.session_state["supabase_key_pending"] = current_supabase_settings["key"]

@@ -17,6 +17,7 @@ REQUIRED_MODEL_FILES = (
     "tokenizer_config.json",
 )
 WEIGHT_FILE_GLOBS = ("*.safetensors", "*.safetensors.index.json")
+PEFT_ADAPTER_CONFIG_FILE = "adapter_config.json"
 
 
 def _suppress_transformers_path_alias_warning() -> None:
@@ -66,6 +67,10 @@ def _resolve_model_dir(model_dir: str | Path | None = None) -> Path:
 
 
 def _is_valid_model_dir(model_dir: Path) -> bool:
+    # PEFT/LoRA outputs need adapter-aware loading; this runtime loads plain Gemma dirs.
+    if (model_dir / PEFT_ADAPTER_CONFIG_FILE).exists():
+        return False
+
     required_files_ready = all((model_dir / filename).exists() for filename in REQUIRED_MODEL_FILES)
     weight_files_ready = any(next(model_dir.glob(pattern), None) is not None for pattern in WEIGHT_FILE_GLOBS)
     return required_files_ready and weight_files_ready

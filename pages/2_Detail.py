@@ -32,6 +32,29 @@ from scripts.utils import (
 )
 
 
+def _normalize_option_value(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def _resolve_requested_option(requested: str, options: list[str]) -> str | None:
+    requested_normalized = _normalize_option_value(str(requested))
+    if not requested_normalized:
+        return None
+    for option in options:
+        if _normalize_option_value(str(option)) == requested_normalized:
+            return option
+    return None
+
+
+def _apply_requested_selectbox_value(request_key: str, widget_key: str, options: list[str], default: str) -> None:
+    requested_value = st.session_state.pop(request_key, None)
+    if requested_value is not None:
+        resolved_value = _resolve_requested_option(str(requested_value), options)
+        st.session_state[widget_key] = resolved_value or default
+    elif st.session_state.get(widget_key) not in options:
+        st.session_state[widget_key] = default
+
+
 def _render_detail_inference_model_selector(selected_records: list[dict[str, Any]]) -> tuple[Path | None, bool, bool]:
     selected_model_dir, model_changed = _render_classifier_model_selector(
         selected_records=selected_records,
@@ -366,11 +389,20 @@ def _render_detail_3d_visualization(selected_records: list[dict[str, Any]]) -> N
     elif features.ndim == 1:
         features = features.reshape(-1, 1)
 
+    reduction_options = ["PCA", "t-SNE", "UMAP"]
+    _apply_requested_selectbox_value(
+        "detail_3d_reduction_requested",
+        "detail_3d_reduction_method",
+        reduction_options,
+        "PCA",
+    )
+
     col1, col2 = st.columns(2)
     with col1:
         reduction_method = st.selectbox(
             "Dimensionality reduction",
-            ["PCA", "t-SNE", "UMAP"],
+            reduction_options,
+            key="detail_3d_reduction_method",
             help="Choose how high-dimensional features should be reduced into 3D.",
         )
     with col2:
@@ -621,10 +653,15 @@ def _render_detail_xai_visualization(
 
     openxai_methods = ["grad", "sg", "itg", "ig", "lime", "shap", "control"]
     supported_methods = {"grad", "sg", "itg", "ig"}
+    _apply_requested_selectbox_value(
+        "detail_xai_method_requested",
+        "detail_xai_method_selector",
+        openxai_methods,
+        "grad",
+    )
     selected_method = st.selectbox(
         "OpenXAI method",
         options=openxai_methods,
-        index=0,
         key="detail_xai_method_selector",
         help="For the current image classification model, grad, sg, itg, and ig are recommended.",
     )
@@ -772,12 +809,20 @@ def render_detail_page(image_records) -> None:
     render_page_header("Detail")
     all_dates = ["All dates"] + sorted({record["date"] for record in image_records}, reverse=True)
     all_classes = ["All classes"] + sorted({record["label"] for record in image_records})
+    _apply_requested_selectbox_value(
+        "detail_class_filter_requested",
+        "detail_class_filter",
+        all_classes,
+        "All classes",
+    )
+    if st.session_state.get("detail_date_filter") not in all_dates:
+        st.session_state["detail_date_filter"] = "All dates"
 
     filter_cols = st.columns([1, 1], gap="large")
     with filter_cols[0]:
-        selected_date = st.selectbox("Date filter", all_dates)
+        selected_date = st.selectbox("Date filter", all_dates, key="detail_date_filter")
     with filter_cols[1]:
-        selected_class = st.selectbox("Class filter", all_classes)
+        selected_class = st.selectbox("Class filter", all_classes, key="detail_class_filter")
 
     filtered = image_records
     if selected_date != "All dates":

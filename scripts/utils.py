@@ -41,6 +41,7 @@ from scripts.local_gemma_model import (
     is_model_downloaded,
     list_available_model_dirs,
 )
+from scripts.app_mcp import execute_app_mcp_tool, route_app_command
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -1312,31 +1313,9 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                     request="",
                     response=st.session_state["gemma_sidebar_notice"],
                 )
-            elif not dependency_ready:
-                st.session_state["gemma_sidebar_status"] = "error"
-                st.session_state["gemma_sidebar_notice"] = dependency_message
-                st.session_state["gemma_sidebar_response"] = ""
-                _append_app_log(
-                    log_type="error",
-                    source="Sidebar LLM",
-                    content="Sidebar LLM request failed because runtime dependencies are unavailable.",
-                    request=prompt_text,
-                    response=dependency_message,
-                )
-            elif not model_ready:
-                st.session_state["gemma_sidebar_status"] = "error"
-                st.session_state["gemma_sidebar_notice"] = "The local model is not ready yet. Please place the model in the configured `model` folder first."
-                st.session_state["gemma_sidebar_response"] = ""
-                _append_app_log(
-                    log_type="error",
-                    source="Sidebar LLM",
-                    content=f"Sidebar LLM request failed because model `{_to_project_relative_path(selected_model_dir)}` is unavailable.",
-                    request=prompt_text,
-                    response=st.session_state["gemma_sidebar_notice"],
-                )
             else:
                 st.session_state["gemma_sidebar_status"] = "running"
-                st.session_state["gemma_sidebar_notice"] = f"{selected_model_name} is generating a response."
+                st.session_state["gemma_sidebar_notice"] = f"{selected_model_name} is processing the command."
                 st.session_state["gemma_sidebar_response"] = ""
                 _append_app_log(
                     log_type="start",
@@ -1348,32 +1327,100 @@ def render_sidebar_llm_panel(current_page_title: str | None = None) -> None:
                 try:
                     with st.spinner("Running the LLM..."):
                         runtime_context = _build_sidebar_runtime_context(current_page_title)
-                        augmented_prompt = (
-                            "[Current Streamlit Runtime Context]\n"
-                            f"{runtime_context}\n\n"
-                            "[User Request]\n"
-                            f"{prompt_text}\n\n"
-                            "Use the current Streamlit dashboard data and session state above as your primary context. "
-                            "Respond only in English. "
-                            "Do not guess about anything missing from the data; state clearly when information is unavailable."
-                        )
-                        answer = generate_response(
-                            prompt=augmented_prompt,
-                            system_prompt=DEFAULT_GEMMA_SYSTEM_PROMPT,
+                        app_route = route_app_command(
+                            user_prompt=prompt_text,
+                            current_page_title=current_page_title,
+                            runtime_context=runtime_context,
+                            model_dir=selected_model_dir,
                             max_new_tokens=int(llm_settings["max_new_tokens"]),
                             temperature=float(llm_settings["temperature"]),
-                            model_dir=selected_model_dir,
+                            allow_llm=dependency_ready and model_ready,
                         )
-                    st.session_state["gemma_sidebar_status"] = "completed"
-                    st.session_state["gemma_sidebar_notice"] = "The response has been generated."
-                    st.session_state["gemma_sidebar_response"] = answer
-                    _append_app_log(
-                        log_type="done",
-                        source="Sidebar LLM",
-                        content=f"Sidebar LLM response completed with model `{_to_project_relative_path(selected_model_dir)}`.",
-                        request=prompt_text,
-                        response=answer,
-                    )
+
+                        if app_route is not None:
+                            tool_result = execute_app_mcp_tool(
+                                app_route["tool"],
+                                app_route.get("arguments", {}),
+                            )
+                            if tool_result.get("clear_dashboard_cache"):
+                                load_dashboard_data.clear()
+                                st.cache_data.clear()
+
+                            answer = app_route.get("assistant_message") or str(tool_result.get("message", ""))
+                            if tool_result.get("status") == "ok":
+                                st.session_state["gemma_sidebar_status"] = "completed"
+                                st.session_state["gemma_sidebar_notice"] = "The MCP app action has been applied."
+                                st.session_state["gemma_sidebar_response"] = answer
+                                _append_app_log(
+                                    log_type="done",
+                                    source="Sidebar MCP",
+                                    content=f"MCP tool `{tool_result.get('tool')}` completed.",
+                                    request=prompt_text,
+                                    response=answer,
+                                )
+                                target_page = str(tool_result.get("target_page") or "").strip()
+                                if target_page:
+                                    st.switch_page(target_page)
+                            else:
+                                st.session_state["gemma_sidebar_status"] = "error"
+                                st.session_state["gemma_sidebar_notice"] = "The MCP app action could not be applied."
+                                st.session_state["gemma_sidebar_response"] = answer
+                                _append_app_log(
+                                    log_type="error",
+                                    source="Sidebar MCP",
+                                    content=f"MCP tool `{tool_result.get('tool')}` failed.",
+                                    request=prompt_text,
+                                    response=answer,
+                                )
+                        elif not dependency_ready:
+                            st.session_state["gemma_sidebar_status"] = "error"
+                            st.session_state["gemma_sidebar_notice"] = dependency_message
+                            st.session_state["gemma_sidebar_response"] = ""
+                            _append_app_log(
+                                log_type="error",
+                                source="Sidebar LLM",
+                                content="Sidebar LLM request failed because runtime dependencies are unavailable.",
+                                request=prompt_text,
+                                response=dependency_message,
+                            )
+                        elif not model_ready:
+                            st.session_state["gemma_sidebar_status"] = "error"
+                            st.session_state["gemma_sidebar_notice"] = "The local model is not ready yet. Please place the model in the configured `model` folder first."
+                            st.session_state["gemma_sidebar_response"] = ""
+                            _append_app_log(
+                                log_type="error",
+                                source="Sidebar LLM",
+                                content=f"Sidebar LLM request failed because model `{_to_project_relative_path(selected_model_dir)}` is unavailable.",
+                                request=prompt_text,
+                                response=st.session_state["gemma_sidebar_notice"],
+                            )
+                        else:
+                            augmented_prompt = (
+                                "[Current Streamlit Runtime Context]\n"
+                                f"{runtime_context}\n\n"
+                                "[User Request]\n"
+                                f"{prompt_text}\n\n"
+                                "Use the current Streamlit dashboard data and session state above as your primary context. "
+                                "Respond only in English. "
+                                "Do not guess about anything missing from the data; state clearly when information is unavailable."
+                            )
+                            answer = generate_response(
+                                prompt=augmented_prompt,
+                                system_prompt=DEFAULT_GEMMA_SYSTEM_PROMPT,
+                                max_new_tokens=int(llm_settings["max_new_tokens"]),
+                                temperature=float(llm_settings["temperature"]),
+                                model_dir=selected_model_dir,
+                            )
+                            st.session_state["gemma_sidebar_status"] = "completed"
+                            st.session_state["gemma_sidebar_notice"] = "The response has been generated."
+                            st.session_state["gemma_sidebar_response"] = answer
+                            _append_app_log(
+                                log_type="done",
+                                source="Sidebar LLM",
+                                content=f"Sidebar LLM response completed with model `{_to_project_relative_path(selected_model_dir)}`.",
+                                request=prompt_text,
+                                response=answer,
+                            )
                 except Exception as exc:
                     st.session_state["gemma_sidebar_status"] = "error"
                     st.session_state["gemma_sidebar_notice"] = "An error occurred while calling the LLM."
