@@ -8,6 +8,8 @@ output/*
 test
 model/*
 .codex
+data/multimodal_dataset
+wandb/
 
 #secreat
 *.toml

@@ -21,8 +21,7 @@ from scripts.utils import (
 
 PAGE_LINKS = (
     ("Summary", "pages/1_Summary.py"),
-    ("Detail", "pages/2_Detail.py"),
-    ("Fine-tuning", "pages/3_Fine_tuning.py"),
+    ("Detail", "pages/2_Detail.py"),  #    ("Fine-tuning", "pages/3_Fine_tuning.py"),
     ("Setting", "pages/4_Setting.py"),
     ("Log", "pages/5_Log.py"),
 )
