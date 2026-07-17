@@ -18,9 +18,17 @@ pip install -e .
 
 ## 1. Database connection
 
+### Way1. Sample dataset
+<p align="center"><img src="../assets/Query_Period.png" alt="Query period" width="500"/></p>
+
 - If no DB is connected, the app runs with the default sample data.
+- Run the app, and the screen below appears. Filter the data period you want to analyze, then click the `Load Data` button to get started.
+
+
+### Way2. Database - Supabase
 - Create the `.streamlit/secrets.toml` file.
 - Add the DB connection settings as shown below. This app currently supports only Supabase.
+- On the `Setting` page, click `DB Settings` to change the DB connection settings.
 
 ```toml
 [connections.supabase]
@@ -28,54 +36,59 @@ SUPABASE_URL = "http://000.0.0.0:12345"
 SUPABASE_KEY = "abcdefghij"
 ```
 
-- On the `Setting` page, click `DB Settings` to change the DB connection settings.
+
 
 ## 2. Dashboard page
+<p align="center"><img src="../assets/Dashboard_Home.png" alt="Dashboard home" width="500"/></p>
 
 - This page provides a summary view of the `Summary`, `Detail`, `Fine-tuning`, `Setting`, and `Log` pages.
 - At the top of the page, set the data period and click `Load Data`. For sample data, keep the default date values.
 - If you do not click `Load Data`, inference and other features will not run.
 
 ## 3. Summary page
-
+<p align="center"><img src="../assets/Summary.png" alt="Summary" width="500"/></p>
 - This page shows the data analysis summary.
+<p align="center"><img src="../assets/Report.png" alt="Report" width="500"/></p>
 - Click `Download Report` to save the current summary as a PDF file.
 
-## 4. Detail page
-
+## 4. Analysis page
+<p align="center"><img src="../assets/Analysis_classification.png" alt="Analysis - Classification" width="500"/></p>
 - This page provides detailed AI inference results for images and related analysis features.
 - Analysis starts only after you select images in `Select images`.
 - Date and class filters are available.
-- The `Result` tab shows the predicted class and image.
-- The `3D Visualization` tab compresses the selected images into lower dimensions with PCA, t-SNE, or UMAP for visualization. It works only when at least 3 images are selected.
-- The `XAI` tab uses OpenXAI to help interpret the model's predictions.
+- Use the `Method` selector to switch between `Classification` and `Anomaly Detection`.
+  - In `Anomaly Detection` mode, click `Run Anomaly Detection` in the sidebar to extract features for the selected images and score them against the memory bank with a PatchCore-based scorer.
+    <p align="center"><img src="../assets/Analysis_AD.png" alt="Analysis - Anomaly Detection" width="500"/></p>
+- The `Result` tab shows the predicted class and image in `Classification` mode, or each image's anomaly score and Normal/Anomaly prediction (based on a calibrated threshold) in `Anomaly Detection` mode.
+- The `3D Visualization` tab compresses the selected images' features into lower dimensions for visualization (PCA, t-SNE, or UMAP in `Classification` mode; patch-averaged, PCA-compressed features in `Anomaly Detection` mode). It works only when at least 3 images are selected.
+  <p align="center"><img src="../assets/Analysis_3d_visual.png" alt="3D Visualization" width="500"/></p>
+- The `XAI` tab uses OpenXAI to help interpret the model's predictions in `Classification` mode. In `Anomaly Detection` mode, this tab is replaced by an `Anomaly Heatmap`, which overlays the PatchCore anomaly map on each image instead.
+  <p align="center"><img src="../assets/Analysis_XAI.png" alt="XAI / Anomaly Heatmap" width="500"/></p>
 
-## 5. Fine-tuning
-
-- This page provides classification model fine-tuning for the currently loaded images.
-- In the left `Image Pool`, you can select the data to use for fine-tuning.
-  - `Trained`: indicates whether the image has already been used for model training. When querying training images, only images with `trained = false` are loaded, so most values will be `false`.
-  - `Predicted Class`: the class predicted by the AI model.
-  - `Select`: the column used to choose images for fine-tuning.
-- Check the label under the `Image Pool` panel, then click `Save labels`.
-  - Double-click the `Label` field to edit it. Be careful with spelling.
-- In the `Interactive Fine-tuning` panel, active learning can automatically select training images. `Random` and `Margin Sampling` are available.
-  - Use the slider to set the sampling rate (%).
-  - Click `Start active learning` to run it.
-- In the same panel, `Manual settings` lets you configure `Epochs`, `Learning rate`, `Repeat count`, and `Preprocessing`.
-  - Click `Start fine-tuning` to begin fine-tuning.
-  - The trained model is saved in the `output` folder.
-
-## 6. Setting
+## 5. Setting
+<p align="center"><img src="../assets/Settings.png" alt="Settings" width="500"/></p>
 
 - `DB Settings`: input values for the DB connection keys.
 - `LLM Runtime`: options for the LLM model used in the left sidebar and in Summary analysis.
 
-## 7. Log
-
+## 6. Log
+<p align="center"><img src="../assets/Log.png" alt="Log" width="500"/></p>
 - You can check the logs generated while using the app.
 - Logs are automatically saved by date in the `log` folder.
 
-## 8. Sidebar: LLM
+## 7. Sidebar: LLM
+<p align="center"><img src="../assets/LLM.png" alt="LLM sidebar" width="150"/></p>
 
 - You can interact with the LLM through the command box in the sidebar.
+
+
+
+#
+
+
+<details>
+<summary>Delete Function</summary>
+
+- Fine-tuning
+
+</details>

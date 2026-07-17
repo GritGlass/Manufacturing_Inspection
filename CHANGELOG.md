@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v0.4.0] - 2026-07-17
+
+### Added
+
+* Added Anomaly Detection feature (PatchCore-based memory bank scoring) on the Analysis page
+
+### Removed
+
+* Removed the Fine-tuning feature
+
+---
+
 ## [v0.3.0] - 2026-04-14
 
 ### Added
