@@ -32,6 +32,13 @@ A Streamlit dashboard project for semiconductor inspection images, supporting cl
 ## 🛠️ Installation
 
 ```bash
+git clone https://github.com/GritGlass/Manufacturing_Inspection.git
+cd repository
+
+git lfs install
+git lfs pull
+
+
 pip install -r requirements.txt
 ```
 
