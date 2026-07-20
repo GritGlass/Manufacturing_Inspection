@@ -33,7 +33,7 @@ A Streamlit dashboard project for semiconductor inspection images, supporting cl
 
 ```bash
 git clone https://github.com/GritGlass/Manufacturing_Inspection.git
-cd repository
+cd Manufacturing_Inspection
 
 git lfs install
 git lfs pull
