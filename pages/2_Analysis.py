@@ -1153,29 +1153,55 @@ def _run_subprocess_with_live_progress(cmd: list[str], cwd: Path, placeholder: A
         raise RuntimeError("\n".join(tail_lines[-30:]) or f"Process exited with code {process.poll()}")
 
 
-def _run_ad_feature_extraction_pipeline(progress_placeholder: Any) -> None:
-    """Run Step1 (feature extraction) + Step2 (PatchCore aggregation) only.
+def _run_ad_feature_extraction_pipeline(image_paths: list[str], progress_placeholder: Any) -> None:
+    """Run Step1 (feature extraction) + Step2 (PatchCore aggregation) for exactly image_paths.
 
     Mirrors: bash scripts/AD/run_feature_pipeline.sh
              RUN_EXTRACT=1 RUN_AGGREGATION=1 BUILD_MEMORY_BANK=0
     (BUILD_MEMORY_BANK has no CLI flag to force 0; it already defaults to 0.)
+
+    run_feature_pipeline.sh's Step1 (wide_resnet_img_feature_extract.py) only accepts a whole
+    --img_dir to scan or a --csv_path list; it never took the selected images before, so it
+    silently fell back to its hardcoded default --img_dir (data/images) regardless of what was
+    selected/queried from the DB. To target exactly image_paths (which can live anywhere, e.g.
+    DB-queried paths outside data/images), write them to a throwaway CSV and use --input_mode csv.
     Streams the script's own tqdm progress (from wide_resnet_img_feature_extract.py) live.
     """
-    cmd = [
-        "bash",
-        str(AD_PIPELINE_SCRIPT),
-        "--run_extract", "1",
-        "--run_aggregation", "1",
-        # run_feature_pipeline.sh hardcodes non-empty defaults for --raw_dir/--agg_dir/
-        # --raw_input1/--agg_output, so --feature_root alone is silently ignored. All four
-        # must be passed explicitly to redirect Step1+2 output into AD_FEATURE_ROOT.
-        "--raw_dir", str(AD_RAW_DIR),
-        "--agg_dir", str(AD_AGG_DIR),
-        "--raw_input1", str(AD_RAW_DIR),
-        "--agg_output", str(AD_AGG_DIR),
-    ]
-    progress_placeholder.text("Step1+2: starting feature extraction + PatchCore aggregation...")
-    _run_subprocess_with_live_progress(cmd, ROOT_DIR, progress_placeholder)
+    import csv
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", prefix="ad_feature_extract_", delete=False, newline="", encoding="utf-8"
+    ) as tmp_csv:
+        writer = csv.writer(tmp_csv)
+        writer.writerow(["data_path", "labels"])
+        for path in image_paths:
+            writer.writerow([path, "selected"])
+        tmp_csv_path = Path(tmp_csv.name)
+
+    try:
+        cmd = [
+            "bash",
+            str(AD_PIPELINE_SCRIPT),
+            "--input_mode", "csv",
+            "--csv_path", str(tmp_csv_path),
+            "--path_col", "data_path",
+            "--label_col", "labels",
+            "--label_filter", "selected",
+            "--run_extract", "1",
+            "--run_aggregation", "1",
+            # run_feature_pipeline.sh hardcodes non-empty defaults for --raw_dir/--agg_dir/
+            # --raw_input1/--agg_output, so --feature_root alone is silently ignored. All four
+            # must be passed explicitly to redirect Step1+2 output into AD_FEATURE_ROOT.
+            "--raw_dir", str(AD_RAW_DIR),
+            "--agg_dir", str(AD_AGG_DIR),
+            "--raw_input1", str(AD_RAW_DIR),
+            "--agg_output", str(AD_AGG_DIR),
+        ]
+        progress_placeholder.text("Step1+2: starting feature extraction + PatchCore aggregation...")
+        _run_subprocess_with_live_progress(cmd, ROOT_DIR, progress_placeholder)
+    finally:
+        tmp_csv_path.unlink(missing_ok=True)
 
 
 def _run_ad_scoring_for_images(image_paths: list[str], progress_placeholder: Any) -> dict[str, Any]:
@@ -1277,7 +1303,7 @@ def _render_ad_run_button(
             path for path in image_paths if not _resolve_ad_agg_feature_path(path).exists()
         ]
         if missing_features:
-            _run_ad_feature_extraction_pipeline(progress_placeholder)
+            _run_ad_feature_extraction_pipeline(missing_features, progress_placeholder)
         else:
             progress_placeholder.text(
                 f"[Step1+2 건너뜀] {len(image_paths)}개 이미지 feature가 이미 "

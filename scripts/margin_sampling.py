@@ -20,7 +20,7 @@ from scripts.detail_finetune_mcp import resolve_base_model_dir
 BASE_DIR = Path(__file__).resolve().parents[1]
 SUPABASE_CONNECTION_NAME = "supabase"
 SUPABASE_IMAGE_TABLE = "semiconductor"
-SUPABASE_IMAGE_COLUMNS = "id,image_path,trained,created_at"
+SUPABASE_IMAGE_COLUMNS = "id,file_path,trained,create_date"
 SUPABASE_QUERY_TTL = "0s"
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 CSV_FALLBACK_DATA_PATH = BASE_DIR / "data" / "data.csv"
@@ -92,7 +92,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
             ttl=SUPABASE_QUERY_TTL,
         )
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
     except Exception as exc:
         client = getattr(connection, "client", None)
@@ -101,10 +101,16 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
 
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS)
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
 
-    return _normalize_row_payload(result)
+    rows = _normalize_row_payload(result)
+    for row in rows:
+        if "file_path" in row:
+            row["image_path"] = row.pop("file_path")
+        if "create_date" in row:
+            row["created_at"] = row.pop("create_date")
+    return rows
 
 
 def _fetch_csv_status_rows() -> list[dict[str, Any]]:

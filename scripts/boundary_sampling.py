@@ -19,7 +19,7 @@ from scripts.detail_finetune_mcp import resolve_base_model_dir
 
 SUPABASE_CONNECTION_NAME = "supabase"
 SUPABASE_IMAGE_TABLE = "semiconductor"
-SUPABASE_IMAGE_COLUMNS = "id,image_path,class,trained,created_at"
+SUPABASE_IMAGE_COLUMNS = "id,file_path,class,trained,create_date"
 SUPABASE_QUERY_TTL = "0s"
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
@@ -99,7 +99,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
             ttl=SUPABASE_QUERY_TTL,
         )
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
     except Exception as exc:
         client = getattr(connection, "client", None)
@@ -108,7 +108,7 @@ def _fetch_supabase_semiconductor_rows() -> list[dict[str, Any]]:
 
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS)
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
 
     return _normalize_row_payload(result)
@@ -118,7 +118,7 @@ def load_supabase_boundary_source_frame() -> pd.DataFrame:
     rows = _fetch_supabase_semiconductor_rows()
     records: list[dict[str, Any]] = []
     for row in rows:
-        normalized_path = _normalize_image_path_key(row.get("image_path"))
+        normalized_path = _normalize_image_path_key(row.get("file_path"))
         if not normalized_path:
             continue
 
@@ -132,7 +132,7 @@ def load_supabase_boundary_source_frame() -> pd.DataFrame:
                 "image_paths": normalized_path,
                 "cluster_label": _normalize_cluster_label(row.get("class")),
                 "trained": _coerce_bool(row.get("trained")),
-                "created_at": row.get("created_at"),
+                "created_at": row.get("create_date"),
             }
         )
 

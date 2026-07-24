@@ -7,9 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from scripts.utils import (
-    SUPABASE_CONNECTION_NAME,
     SUPABASE_IMAGE_TABLE,
-    SupabaseConnection,
     build_aggregate_run,
     build_label_distribution_frame,
     configure_page,
@@ -98,26 +96,9 @@ def render_home_page(config: dict[str, Any], runs: list[dict[str, Any]], log_ent
 
 def _fetch_supabase_table_list() -> list[str]:
     """Return public table names from the connected Supabase project."""
-    if SupabaseConnection is None:
-        return [SUPABASE_IMAGE_TABLE]
-    try:
-        connection = st.connection(SUPABASE_CONNECTION_NAME, type=SupabaseConnection)
-        client = getattr(connection, "client", None)
-        if client is None:
-            return [SUPABASE_IMAGE_TABLE]
-        result = (
-            client.table("information_schema.tables")
-            .select("table_name")
-            .eq("table_schema", "public")
-            .eq("table_type", "BASE TABLE")
-            .order("table_name")
-            .execute()
-        )
-        rows = getattr(result, "data", []) or []
-        names = [row["table_name"] for row in rows if isinstance(row, dict) and row.get("table_name")]
-        return names if names else [SUPABASE_IMAGE_TABLE]
-    except Exception:
-        return [SUPABASE_IMAGE_TABLE]
+    # PostgREST does not expose `information_schema` as a queryable resource,
+    # so there is no supported way to list tables through the REST API here.
+    return [SUPABASE_IMAGE_TABLE]
 
 
 def set_query_table() -> None:

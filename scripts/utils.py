@@ -117,7 +117,7 @@ DEFAULT_LLM_MAX_NEW_TOKENS = 512
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
 SUPABASE_CONNECTION_NAME = "supabase"
 SUPABASE_IMAGE_TABLE = "semiconductor"
-SUPABASE_IMAGE_COLUMNS = "id,image_path,class,trained,predict,type,created_at"
+SUPABASE_IMAGE_COLUMNS = "id,file_path,class,trained,predict,type,create_date"
 SUPABASE_QUERY_TTL = "10m"
 CSV_FALLBACK_DATA_PATH = BASE_DIR / "data" / "data.csv"
 
@@ -462,11 +462,11 @@ def _fetch_supabase_semiconductor_rows(query_date_start: str | None = None, quer
             query_builder = query_builder.eq("trained", False)
         if date_start is not None and date_end is not None:
             if hasattr(query_builder, "gte"):
-                query_builder = query_builder.gte("created_at", date_start.isoformat())
+                query_builder = query_builder.gte("create_date", date_start.isoformat())
             if hasattr(query_builder, "lt"):
-                query_builder = query_builder.lt("created_at", date_end.isoformat())
+                query_builder = query_builder.lt("create_date", date_end.isoformat())
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
     except Exception as exc:
         last_error = exc
@@ -477,11 +477,11 @@ def _fetch_supabase_semiconductor_rows(query_date_start: str | None = None, quer
         query_builder = client.table(SUPABASE_IMAGE_TABLE).select(SUPABASE_IMAGE_COLUMNS).eq("trained", False)
         if date_start is not None and date_end is not None:
             if hasattr(query_builder, "gte"):
-                query_builder = query_builder.gte("created_at", date_start.isoformat())
+                query_builder = query_builder.gte("create_date", date_start.isoformat())
             if hasattr(query_builder, "lt"):
-                query_builder = query_builder.lt("created_at", date_end.isoformat())
+                query_builder = query_builder.lt("create_date", date_end.isoformat())
         if hasattr(query_builder, "order"):
-            query_builder = query_builder.order("created_at", desc=False)
+            query_builder = query_builder.order("create_date", desc=False)
         result = query_builder.execute()
 
     rows = getattr(result, "data", result)
@@ -515,7 +515,7 @@ def _load_supabase_image_candidates(
     skipped_invalid_paths = 0
 
     for row in rows:
-        raw_image_path = str(row.get("image_path") or "").strip()
+        raw_image_path = str(row.get("file_path") or "").strip()
         if not raw_image_path:
             skipped_invalid_paths += 1
             continue
@@ -530,7 +530,7 @@ def _load_supabase_image_candidates(
 
         source_label = _normalize_db_label(row.get("class"), image_path.parent.name)
         database_predict = str(row.get("predict") or "").strip() or None
-        created_at = _parse_record_timestamp(row.get("created_at"), reference_time)
+        created_at = _parse_record_timestamp(row.get("create_date"), reference_time)
         discovered_images.append(
             {
                 "record_id": row.get("id"),
@@ -562,7 +562,7 @@ def _load_supabase_image_candidates(
                 source="Supabase",
                 content=(
                     f"{skipped_invalid_paths} image entries loaded from the semiconductor table were skipped "
-                    "because the `image_path` format was invalid."
+                    "because the `file_path` format was invalid."
                 ),
                 timestamp=reference_time,
             )
