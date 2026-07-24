@@ -34,6 +34,7 @@ AD_OUTPUT_DIR = ROOT_DIR / "outputs" / "AD"
 from scripts.detail_finetune_mcp import resolve_base_model_dir
 from scripts.utils import (
     CLASS_VISUALIZATION_ORDER,
+    _append_app_log,
     _extract_features_from_images,
     _get_cached_detail_inference_result,
     _get_discrete_class_colors,
@@ -44,6 +45,13 @@ from scripts.utils import (
     load_dashboard_data,
     render_page_header,
 )
+
+
+def _summarize_selected_filenames(records: list[dict[str, Any]], limit: int = 10) -> str:
+    filenames = ", ".join(record["filename"] for record in records[:limit])
+    if len(records) > limit:
+        filenames += f", ... (+{len(records) - limit} more)"
+    return filenames
 
 
 def _normalize_option_value(value: str) -> str:
@@ -69,26 +77,20 @@ def _apply_requested_selectbox_value(request_key: str, widget_key: str, options:
         st.session_state[widget_key] = default
 
 
-def _render_detail_inference_model_selector(selected_records: list[dict[str, Any]]) -> tuple[Path | None, bool, bool]:
+def _render_detail_inference_model_selector(selected_records: list[dict[str, Any]]) -> tuple[Path | None, bool]:
     selected_model_dir, model_changed = _render_classifier_model_selector(
         selected_records=selected_records,
         container=st.sidebar,
         selector_key="detail_inference_model_selector",
         active_key="detail_inference_model_active",
         section_title="Image Inference",
-        helper_text="Choose a model, then click Start infer to run inference again on the currently selected images.",
+        helper_text="Choose a model, then click Run to run inference again on the currently selected images.",
         label="Inference model",
         add_divider=True,
     )
-    start_infer = st.sidebar.button(
-        "Start infer",
-        key="detail_inference_start_button",
-        width="stretch",
-        disabled=selected_model_dir is None or not selected_records,
-    )
     if selected_records and model_changed:
-        st.sidebar.caption("The model has changed. Click `Start infer` to rerun inference with the new model.")
-    return selected_model_dir, model_changed, start_infer
+        st.sidebar.caption("The model has changed. Click `Run` to rerun inference with the new model.")
+    return selected_model_dir, model_changed
 
 
 def _resolve_inference_output_targets(output_path: Path, inference_mode: str) -> tuple[Path, Path, Path]:
@@ -312,6 +314,29 @@ def _predict_detail_records_with_model(
         artifact_paths["timing_path"] if artifact_paths else ""
     )
     return predicted_records, prediction_errors, artifact_paths
+
+
+def _log_detail_classification_run(
+    selected_records: list[dict[str, Any]],
+    model_dir: Path,
+    prediction_errors: list[str],
+    artifact_paths: dict[str, str] | None,
+) -> None:
+    content = (
+        f"Classification re-inference run on {len(selected_records)} selected image(s) "
+        f"with model `{_to_project_relative_path(resolve_base_model_dir(model_dir))}`. "
+        f"Images: {_summarize_selected_filenames(selected_records)}."
+    )
+    if artifact_paths:
+        content += f" Results saved to `{_to_project_relative_path(Path(artifact_paths['output_dir']))}`."
+    if prediction_errors:
+        content += f" {len(prediction_errors)} image(s) failed."
+
+    _append_app_log(
+        log_type="error" if prediction_errors and not artifact_paths else "done",
+        source="Analysis Classification",
+        content=content,
+    )
 
 
 def _resolve_selected_model_dirs(selected_records: list[dict[str, Any]]) -> list[Path]:
@@ -1283,6 +1308,38 @@ def _get_cached_ad_pipeline_data(selected_records: list[dict[str, Any]]) -> dict
     return None
 
 
+def _log_detail_ad_run(
+    selected_records: list[dict[str, Any]],
+    feature_extraction_performed: bool,
+    missing_feature_count: int,
+    pipeline_data: dict[str, Any] | None,
+    error: str | None,
+) -> None:
+    content = (
+        f"Anomaly detection run on {len(selected_records)} selected image(s). "
+        f"Images: {_summarize_selected_filenames(selected_records)}. "
+    )
+    content += (
+        f"Feature extraction performed for {missing_feature_count} image(s) missing from "
+        f"`{_to_project_relative_path(AD_AGG_DIR)}`."
+        if feature_extraction_performed
+        else f"Feature extraction skipped (features already present in `{_to_project_relative_path(AD_AGG_DIR)}`)."
+    )
+    if error:
+        content += f" Pipeline failed: {error}"
+    elif pipeline_data is not None:
+        errors = pipeline_data.get("errors", [])
+        content += f" Scored {len(pipeline_data.get('results', {}))} image(s)."
+        if errors:
+            content += f" {len(errors)} image(s) failed scoring."
+
+    _append_app_log(
+        log_type="error" if error else "done",
+        source="Analysis Anomaly Detection",
+        content=content,
+    )
+
+
 def _render_ad_run_button(
     container: Any,
     selected_records: list[dict[str, Any]],
@@ -1298,6 +1355,7 @@ def _render_ad_run_button(
         return
 
     image_paths = [record["path"] for record in selected_records if record.get("exists")]
+    missing_features: list[str] = []
     try:
         missing_features = [
             path for path in image_paths if not _resolve_ad_agg_feature_path(path).exists()
@@ -1313,6 +1371,7 @@ def _render_ad_run_button(
     except Exception as exc:
         progress_placeholder.empty()
         st.error(f"Anomaly detection pipeline failed: {exc}")
+        _log_detail_ad_run(selected_records, bool(missing_features), len(missing_features), None, str(exc))
         return
 
     progress_placeholder.empty()
@@ -1322,6 +1381,7 @@ def _render_ad_run_button(
         st.warning("Some images could not be scored: " + "; ".join(pipeline_data["errors"][:3]))
     else:
         st.success(f"Anomaly detection completed for {len(pipeline_data['results'])} image(s).")
+    _log_detail_ad_run(selected_records, bool(missing_features), len(missing_features), pipeline_data, None)
     st.rerun()
 
 
@@ -1525,11 +1585,15 @@ def render_detail_page(image_records) -> None:
         method_options,
         "Classification",
     )
-    method_col, ad_run_button_col = st.columns([3, 1])
+    method_col, method_run_button_col = st.columns([3, 1])
     with method_col:
         st.selectbox("Method", method_options, key="detail_method_filter")
     method = st.session_state["detail_method_filter"]
-    ad_run_button_placeholder = ad_run_button_col.empty()
+    method_run_button_placeholder = method_run_button_col.empty()
+    st.markdown(
+        "<style>.st-key-method_run_button_nudge { margin-top: 12px; }</style>",
+        unsafe_allow_html=True,
+    )
 
     filter_cols = st.columns([1, 1], gap="large")
     with filter_cols[0]:
@@ -1571,9 +1635,34 @@ def render_detail_page(image_records) -> None:
     raw_selected_records = _get_detail_selected_records(image_records) if selected_paths else []
     if method == "Anomaly Detection":
         ad_progress_placeholder = st.empty()
-        with ad_run_button_placeholder.container():
-            st.write("")
-            _render_ad_run_button(st, raw_selected_records, ad_progress_placeholder)
+        with method_run_button_placeholder.container():
+            with st.container(key="method_run_button_nudge"):
+                st.write("")
+                _render_ad_run_button(st, raw_selected_records, ad_progress_placeholder)
+    else:
+        rerun_model_dir, _ = _render_detail_inference_model_selector(raw_selected_records)
+        with method_run_button_placeholder.container():
+            with st.container(key="method_run_button_nudge"):
+                st.write("")
+                classification_run_clicked = st.button(
+                    "Run",
+                    key="detail_classification_run_button",
+                    width="stretch",
+                    disabled=rerun_model_dir is None or not raw_selected_records,
+                )
+        if classification_run_clicked and rerun_model_dir is not None:
+            _, prediction_errors, artifact_paths = _predict_detail_records_with_model(
+                raw_selected_records, rerun_model_dir
+            )
+            _log_detail_classification_run(raw_selected_records, rerun_model_dir, prediction_errors, artifact_paths)
+            st.rerun()
+        elif rerun_model_dir is not None:
+            cached_signature = (
+                str(resolve_base_model_dir(rerun_model_dir)),
+                tuple(record["path"] for record in raw_selected_records),
+            )
+            if st.session_state.get("detail_inference_prediction_signature") == cached_signature:
+                raw_selected_records = st.session_state["detail_inference_prediction_records"]
 
     selected_records = []
     result_total = 0
