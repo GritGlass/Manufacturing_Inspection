@@ -4,7 +4,7 @@
   <figure>
     <a href="https://youtu.be/LEap37YUmlg">
       <img src="assets/manufacturing_inspection.png" width="700"/>
-    </a>
+    </a><br>
     <figcaption align="center">
       <sub>Demo Video</sub>
     </figcaption>
