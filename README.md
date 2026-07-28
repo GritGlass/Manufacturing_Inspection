@@ -1,14 +1,13 @@
 # 🏭 Manufacturing Inspection Application
 
 <p align="center">
-  <figure>
-    <a href="https://youtu.be/LEap37YUmlg">
-      <img src="assets/manufacturing_inspection.png" width="700"/>
-    </a><br>
-    <figcaption align="center">
-      <sub>Demo Video</sub>
-    </figcaption>
-  </figure>
+  <a href="https://youtu.be/LEap37YUmlg">
+    <img src="assets/manufacturing_inspection.png" width="700"/>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Demo Video (Click the image)</sub>
 </p>
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
