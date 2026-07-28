@@ -3,8 +3,9 @@
 <p align="center">
   <a href="https://youtu.be/LEap37YUmlg">
     <img src="assets/manufacturing_inspection.png" width="700"/>
+    <sub> Demo Video </sub>
   </a>
-  <sub> Demo Video </sub>
+  
 </p>
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
