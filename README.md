@@ -13,7 +13,7 @@ A Streamlit-based application for semiconductor inspection, featuring image clas
 </p>
 
 <p align="center">
-  <sub>Demo Video (Click the image)</sub>
+  <sub>Manufacturing Inspection Application (Click the image)</sub>
 </p>
 
 ---
