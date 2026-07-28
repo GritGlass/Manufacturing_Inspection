@@ -10,9 +10,6 @@ All notable changes to this project will be documented in this file.
 
 * Added Anomaly Detection feature (PatchCore-based memory bank scoring) on the Analysis page
 
-### Removed
-
-* Removed the Fine-tuning feature
 
 ---
 
