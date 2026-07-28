@@ -10,10 +10,6 @@
   <sub>Demo Video (Click the image)</sub>
 </p>
 
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.x-red)
-![Status](https://img.shields.io/badge/Status-Active-success)
-
 ---
 
 ## 📌 Overview
