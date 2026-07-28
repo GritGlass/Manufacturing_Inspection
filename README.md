@@ -8,7 +8,7 @@ A Streamlit-based application for semiconductor inspection, featuring image clas
 
 <p align="center">
   <a href="https://youtu.be/LEap37YUmlg">
-    <img src="assets/manufacturing_inspection.png" width="700"/>
+    <img src="assets/Analysis_AD.png" width="700"/>
   </a>
 </p>
 
