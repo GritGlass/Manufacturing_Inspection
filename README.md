@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://youtu.be/LEap37YUmlg">
-    <img src="assets/manufacturing_inspection.png" width="700"/>
+    <img src="assets/manufacturing_inspection.png" width="700"/><br>
     <sub> Demo Video </sub>
   </a>
   
