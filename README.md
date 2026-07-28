@@ -1,7 +1,7 @@
-# 🏭 Manufacturing Inspection Dashboard
+# 🏭 Manufacturing Inspection Application
 
 <p align="center">
-  <a href="https://www.linkedin.com/posts/yuri-h-18670a304_ai-computervision-manufacturing-ugcPost-7449830679279742976-G7oc?utm_source=share&utm_medium=member_desktop&rcm=ACoAAE20GHYBQjrONldF5Ug1Emtcc3XKbVdKhjM">
+  <a href="https://youtu.be/LEap37YUmlg">
     <img src="assets/manufacturing_inspection.png" width="700"/>
   </a>
 </p>
@@ -14,15 +14,16 @@
 
 ## 📌 Overview
 
-A Streamlit dashboard project for semiconductor inspection images, supporting classification, inference, Active Learning-based sample selection, and fine-tuning.
+A Streamlit-based application for semiconductor inspection, featuring image classification, inference, active learning-based sample selection, and model fine-tuning.
 
 ---
 
 
 ## 🚀 Features
 
-* Streamlit-based inspection dashboard
+* Streamlit-based inspection Application
 * MobileViT image classification training and inference
+* PatchCore-based Anomaly Detection
 * Active Learning-based sampling
 * Interactive fine-tuning with selected images
 * Gemma-based assistant responses
