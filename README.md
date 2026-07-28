@@ -1,5 +1,8 @@
 # 🏭 Manufacturing Inspection Application
 
+
+A Streamlit-based application for semiconductor inspection, featuring image classification, inference, active learning-based sample selection, and model fine-tuning.
+
 <p align="center">
   <a href="https://youtu.be/LEap37YUmlg">
     <img src="assets/manufacturing_inspection.png" width="700"/>
@@ -9,12 +12,6 @@
 <p align="center">
   <sub>Demo Video (Click the image)</sub>
 </p>
-
----
-
-## 📌 Overview
-
-A Streamlit-based application for semiconductor inspection, featuring image classification, inference, active learning-based sample selection, and model fine-tuning.
 
 ---
 
