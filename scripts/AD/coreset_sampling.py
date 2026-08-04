@@ -64,7 +64,13 @@ def greedy_coreset_indices(
     # ||a-b||^2 = ||a||^2 - 2*a·b + ||b||^2 전개로 계산한다: torch.cdist는 매 스텝
     # [N, d*] 크기의 임시 버퍼를 새로 할당해 GPU에서 OOM을 유발하므로, 대신
     # 행렬-벡터 곱(GEMV)만 써서 O(N) 메모리로 거리를 구한다.
-    norms_sq = (work * work).sum(dim=1)  # [N]
+    # norms_sq도 (work * work)를 통째로 계산하면 work와 같은 크기(N x d*)의 임시
+    # 버퍼가 순간적으로 추가 할당되어 GPU 메모리가 튀므로, 행 청크 단위로 나눠 계산한다.
+    norms_sq = torch.empty(N, dtype=work.dtype, device=device)
+    _norm_chunk = 200_000
+    for _s in range(0, N, _norm_chunk):
+        _e = min(_s + _norm_chunk, N)
+        norms_sq[_s:_e] = (work[_s:_e] * work[_s:_e]).sum(dim=1)
 
     def sq_dists_to(idx: int) -> torch.Tensor:
         cross = work @ work[idx]  # [N]
@@ -116,6 +122,18 @@ def scan_patch_files(input_dir: Path) -> tuple[list[Path], int, int]:
     return npy_files, total, dim
 
 
+def _pca_chunk_bounds(total: int, batch_size: int, min_size: int) -> list[tuple[int, int]]:
+    """IncrementalPCA용 청크 경계 목록. 마지막 청크가 min_size(=n_components)보다
+    작아지지 않도록 직전 청크와 합친다 (IncrementalPCA는 배치 크기가
+    n_components보다 작으면 에러를 낸다)."""
+    bounds = [(s, min(s + batch_size, total)) for s in range(0, total, batch_size)]
+    if len(bounds) >= 2 and (bounds[-1][1] - bounds[-1][0]) < min_size:
+        prev_start, _ = bounds[-2]
+        _, last_end = bounds[-1]
+        bounds = bounds[:-2] + [(prev_start, last_end)]
+    return bounds
+
+
 def stream_build_bank(
     npy_files: list[Path],
     total: int,
@@ -123,12 +141,19 @@ def stream_build_bank(
     bank_path: Path,
     proj_dim: int | None,
     seed: int,
+    proj_type: str = "JL",
+    pca_batch_size: int = 4096,
 ) -> tuple[np.memmap, torch.Tensor]:
     """파일을 하나씩 읽어 원본 차원 patch bank는 디스크 memmap에 채우고,
-    JL 사영된 저차원 표현(work)은 RAM에 누적한다.
+    저차원 사영 결과(work)는 RAM에 누적한다.
 
     한 시점에 RAM에 올라오는 원본 데이터는 파일 하나 분량뿐이므로,
     전체 patch 수가 많아도 메모리 사용량은 O(파일 하나 크기 + N x proj_dim)로 유지된다.
+
+    proj_type='JL': 랜덤 선형 사영이라 파일을 읽는 동시에 바로 적용 가능.
+    proj_type='PCA': fit에 전체 데이터가 필요하므로, patch bank를 디스크에 다 쓴
+      뒤 IncrementalPCA로 그 memmap을 청크 단위로만 다시 읽어 fit/transform한다
+      (한 번에 batch_size행만 RAM에 올라오므로 전체를 한 번에 올리는 것보다 안전).
     """
     bank = np.lib.format.open_memmap(bank_path, mode="w+", dtype=np.float32, shape=(total, dim))
 
@@ -136,9 +161,10 @@ def stream_build_bank(
     psi: torch.Tensor
     work: torch.Tensor
     if use_proj and proj_dim is not None:
-        gen = torch.Generator(device="cpu").manual_seed(seed)
-        psi = torch.randn(dim, proj_dim, generator=gen) / np.sqrt(proj_dim)
         work = torch.empty((total, proj_dim), dtype=torch.float32)
+        if proj_type == "JL":
+            gen = torch.Generator(device="cpu").manual_seed(seed)
+            psi = torch.randn(dim, proj_dim, generator=gen) / np.sqrt(proj_dim)
 
     offset = 0
     for f in npy_files:
@@ -150,12 +176,27 @@ def stream_build_bank(
             patches = arr
         n = patches.shape[0]
         bank[offset:offset + n] = patches
-        if use_proj:
+        if use_proj and proj_type == "JL":
             work[offset:offset + n] = torch.from_numpy(patches).float() @ psi
         print(f"  {f.name}: {arr.shape} -> {n} patches ({offset + n}/{total})")
         offset += n
 
     bank.flush()
+
+    if use_proj and proj_type == "PCA" and proj_dim is not None:
+        from sklearn.decomposition import IncrementalPCA
+        chunks = _pca_chunk_bounds(total, pca_batch_size, min_size=proj_dim)
+
+        print(f"  PCA fit 중 (IncrementalPCA, {len(chunks)}개 청크)...")
+        ipca = IncrementalPCA(n_components=proj_dim, batch_size=pca_batch_size)
+        for start, end in chunks:
+            ipca.partial_fit(bank[start:end])
+
+        print("  PCA transform 적용 중...")
+        for start, end in chunks:
+            work[start:end] = torch.from_numpy(ipca.transform(bank[start:end]).astype(np.float32))
+        print(f"  설명된 분산 비율 합: {ipca.explained_variance_ratio_.sum():.4f}")
+
     if not use_proj:
         # 원본 차원을 그대로 선택 공간으로 사용 (memmap 기반, page cache로 관리되어
         # concatenate 방식보다 안전하지만 여전히 RAM 부담이 클 수 있음)
@@ -170,7 +211,12 @@ def main():
     parser.add_argument("--percentage", type=float, default=0.01,
                         help="subsampling 비율 (예: 0.01 = PatchCore-1%%)")
     parser.add_argument("--proj-dim", type=int, default=128,
-                        help="JL 랜덤 사영 차원 d*. 0이면 사영 생략")
+                        help="랜덤/PCA 사영 차원 d*. 0이면 사영 생략")
+    parser.add_argument("--proj-type", default="JL", choices=["JL", "PCA"],
+                        help="사영 방식. JL=랜덤 선형 사영(빠름, 스트리밍 중 바로 적용). "
+                             "PCA=IncrementalPCA로 청크 단위 fit/transform(느리지만 분산 보존 기준으로 선택)")
+    parser.add_argument("--pca-batch-size", type=int, default=4096,
+                        help="PCA fit/transform 시 한 번에 메모리에 올릴 patch 수")
     parser.add_argument("--output", default=None,
                         help="coreset 저장 디렉토리 (기본: <input>과 같은 레벨의 'coreset' 디렉토리)")
     parser.add_argument("--seed", type=int, default=0)
@@ -195,7 +241,8 @@ def main():
     bank_path = tmp_dir / "patch_bank.npy"
     try:
         print(f"patch bank를 디스크에 스트리밍 저장 중: {bank_path}")
-        bank, work = stream_build_bank(npy_files, N, d, bank_path, proj, args.seed)
+        bank, work = stream_build_bank(npy_files, N, d, bank_path, proj, args.seed,
+                                        proj_type=args.proj_type, pca_batch_size=args.pca_batch_size)
 
         if args.device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
