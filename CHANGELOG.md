@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v0.5.0] - 2026-08-04
+
+### Changed
+
+* Changed the default coreset projection method from JL (random projection) to PCA on the Anomaly Detection memory bank pipeline — projection is now fit via IncrementalPCA over disk-backed patch bank chunks, trading speed for a variance-preserving, deterministic projection
+* Added `--proj-type` (`JL`/`PCA`) and `--pca-batch-size` options to `coreset_sampling.py` and `run_feature_pipeline.sh` to switch between projection methods
+
+---
+
 ## [v0.4.0] - 2026-07-17
 
 ### Added
