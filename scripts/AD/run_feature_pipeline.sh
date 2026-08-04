@@ -63,6 +63,8 @@ TARGET_DIM=""
 MEMORY_BANK_DIR="$PROJECT_ROOT/data/memory_bank"
 CORESET_PERCENTAGE=0.01
 CORESET_PROJ_DIM=128
+CORESET_PROJ_TYPE="PCA"  # JL/PCA. PCA는 IncrementalPCA로 청크 단위 fit (느리지만 OOM 안전)
+CORESET_PCA_BATCH_SIZE=4096
 CORESET_SEED=0
 CORESET_DEVICE="auto"  # auto/cuda/cpu. 디스플레이 겸용 GPU에서 RC watchdog(Xid 8)으로 죽으면 cpu로 지정
 
@@ -103,6 +105,8 @@ while [[ $# -gt 0 ]]; do
         --memory_bank_dir)        MEMORY_BANK_DIR="$2";        shift 2 ;;
         --coreset_percentage)     CORESET_PERCENTAGE="$2";     shift 2 ;;
         --coreset_proj_dim)       CORESET_PROJ_DIM="$2";       shift 2 ;;
+        --proj-type)              CORESET_PROJ_TYPE="$2";      shift 2 ;;
+        --pca-batch-size)         CORESET_PCA_BATCH_SIZE="$2"; shift 2 ;;
         --coreset_seed)           CORESET_SEED="$2";           shift 2 ;;
         --coreset_device)         CORESET_DEVICE="$2";         shift 2 ;;
 
@@ -217,6 +221,8 @@ if [[ $BUILD_MEMORY_BANK -eq 1 ]]; then
         --output "$MEMORY_BANK_DIR" \
         --percentage "$CORESET_PERCENTAGE" \
         --proj-dim "$CORESET_PROJ_DIM" \
+        --proj-type "$CORESET_PROJ_TYPE" \
+        --pca-batch-size "$CORESET_PCA_BATCH_SIZE" \
         --seed "$CORESET_SEED" \
         --device "$CORESET_DEVICE"
 else
