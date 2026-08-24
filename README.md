@@ -1,5 +1,6 @@
 # 🏭 Manufacturing Inspection Application
 
+*[한국어](README.ko.md)*
 
 A Streamlit-based application for semiconductor inspection, featuring image classification, inference, active learning-based sample selection, and model fine-tuning.
 
